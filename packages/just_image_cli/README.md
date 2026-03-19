@@ -2,7 +2,7 @@
 
 Command-line tool for high-performance image processing, powered by [`just_image`](https://pub.dev/packages/just_image).
 
-Resize, convert, crop, rotate, apply effects, and inspect images — all from the terminal.
+Resize, convert, crop, rotate, apply artistic filters, generate thumbnails, and work with BlurHash — all from the terminal.
 
 ## Prerequisites
 
@@ -37,10 +37,49 @@ just_image_cli process -i photo.jpg -o result.webp [options]
 | `--rotate` | Rotation in degrees | `--rotate 90` |
 | `--flip` | Flip direction (horizontal, vertical) | `--flip horizontal` |
 | `--crop` | Crop as X,Y,W,H | `--crop 0,0,800,600` |
+| `--filter` | Apply artistic filter by name | `--filter vintage` |
+| `--thumbnail` | Generate thumbnail WxH | `--thumbnail 200x200` |
 | `--watermark` | Watermark image path | `--watermark logo.png` |
 | `--watermark-x` | Watermark X offset (default: 0) | `--watermark-x 50` |
 | `--watermark-y` | Watermark Y offset (default: 0) | `--watermark-y 50` |
 | `--watermark-opacity` | Watermark opacity 0.0-1.0 (default: 1.0) | `--watermark-opacity 0.7` |
+
+### `filters` — List available filters
+
+```bash
+just_image_cli filters
+```
+
+Output:
+
+```
+Available filters (15):
+  • vintage
+  • sepia
+  • cool
+  • warm
+  • marine
+  • dramatic
+  • lomo
+  • retro
+  • noir
+  • bloom
+  • polaroid
+  • golden_hour
+  • arctic
+  • cinematic
+  • fade
+```
+
+### `blurhash` — Encode/decode BlurHash
+
+```bash
+# Encode an image to BlurHash string
+just_image_cli blurhash encode -i photo.jpg
+
+# Decode a BlurHash string to PNG
+just_image_cli blurhash decode --hash "LEHV6nWB2yk8..." -o placeholder.png --width 32 --height 32
+```
 
 ### `info` — Inspect images
 
@@ -59,17 +98,21 @@ File size:  3.2 MB
 ## Examples
 
 ```bash
-# Convert JPEG to WebP at quality 85
-just_image_cli process -i photo.jpg -o photo.webp -f webp -q 85
+# Apply vintage filter and convert to WebP
+just_image_cli process -i photo.jpg -o vintage.webp --filter vintage -f webp -q 85
 
-# Resize and sharpen
-just_image_cli process -i input.png -o thumb.png --resize 400x300 --sharpen 1.5
+# Generate thumbnail
+just_image_cli process -i photo.jpg -o thumb.jpg --thumbnail 200x200
 
-# Crop, rotate, and adjust brightness
+# Encode BlurHash for a placeholder
+just_image_cli blurhash encode -i photo.jpg
+# Output: LEHV6nWB2yk8pyo0adR*.7kCMdnj
+
+# Full pipeline: resize, filter, and format conversion
 just_image_cli process -i raw.tiff -o final.avif \
-  --crop 100,200,1600,1200 --rotate 90 --brightness 0.1 -f avif
+  --resize 1920x1080 --filter cinematic --brightness 0.05 -f avif -q 80
 
-# Add watermark
+# Add watermark with transparency
 just_image_cli process -i photo.jpg -o branded.jpg \
   --watermark logo.png --watermark-x 50 --watermark-y 50 --watermark-opacity 0.5
 ```

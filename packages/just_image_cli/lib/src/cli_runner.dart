@@ -1,5 +1,7 @@
 import 'package:args/command_runner.dart';
 
+import 'commands/blurhash_command.dart';
+import 'commands/filters_command.dart';
 import 'commands/info_command.dart';
 import 'commands/process_command.dart';
 
@@ -12,6 +14,8 @@ CommandRunner<void> buildCliRunner() {
 
   runner.addCommand(ProcessCommand());
   runner.addCommand(InfoCommand());
+  runner.addCommand(FiltersCommand());
+  runner.addCommand(BlurHashCommand());
 
   return runner;
 }

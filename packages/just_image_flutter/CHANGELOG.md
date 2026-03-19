@@ -1,3 +1,7 @@
+## 1.0.1
+
+- Re-exports new `just_image` 1.0.1 features: artistic filters, thumbnails, and BlurHash.
+
 ## 1.0.0
 
 - Initial release.

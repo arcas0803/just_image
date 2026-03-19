@@ -50,14 +50,28 @@ Import the package — the full `just_image` API is re-exported:
 ```dart
 import 'package:just_image_flutter/just_image_flutter.dart';
 
+// Apply artistic filter + thumbnail
 final result = await ImagePipeline(imageBytes)
+    .filter('polaroid')
+    .thumbnail(400, 300)
+    .toFormat(ImageFormat.webp)
+    .quality(85)
+    .execute();
+
+// BlurHash for placeholders
+final engine = JustImageEngine();
+final hash = await engine.blurHashEncode(imageBytes);
+final placeholder = await engine.blurHashDecode(hash, width: 32, height: 32);
+
+// Full pipeline
+final processed = await ImagePipeline(imageBytes)
     .resize(1920, 1080)
     .sharpen(1.5)
     .toFormat(ImageFormat.avif)
     .quality(85)
     .execute();
 
-File('output.avif').writeAsBytesSync(result.data);
+File('output.avif').writeAsBytesSync(processed.data);
 ```
 
 ## How it works

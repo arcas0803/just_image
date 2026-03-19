@@ -1,13 +1,13 @@
 // ignore_for_file: unused_local_variable
-/// Ejemplo completo de just_image: procesamiento de imágenes con el motor Rust nativo.
+/// Complete just_image example: image processing with the native Rust engine.
 ///
-/// Antes de ejecutar, genera las imágenes de prueba:
+/// Before running, generate the test images:
 ///   dart run example/create_test_images.dart
 ///
-/// Luego ejecuta el ejemplo:
+/// Then run the example:
 ///   dart run example/just_image_example.dart
 ///
-/// NOTA: Requiere que la librería nativa esté compilada:
+/// NOTE: Requires the native library to be compiled:
 ///   cd native && cargo build --release
 library;
 
@@ -20,22 +20,22 @@ Future<void> main() async {
   final outDir = 'example/output';
   Directory(outDir).createSync(recursive: true);
 
-  // Verificar que las imágenes de prueba existen
+  // Check that test images exist
   final gradientFile = File('$imgDir/gradient.bmp');
   if (!gradientFile.existsSync()) {
-    print('⚠ No se encontraron imágenes de prueba.');
-    print('  Ejecuta primero: dart run example/create_test_images.dart');
+    print('⚠ Test images not found.');
+    print('  Run first: dart run example/create_test_images.dart');
     return;
   }
 
   print('═══════════════════════════════════════');
-  print('  just_image — Ejemplo de procesamiento');
+  print('  just_image — Processing Example');
   print('═══════════════════════════════════════\n');
 
   // ─────────────────────────────────────
-  // 1. Pipeline fluido básico: resize + sharpen + cambio de formato
+  // 1. Basic fluent pipeline: resize + sharpen + format conversion
   // ─────────────────────────────────────
-  print('1. Pipeline básico: resize + sharpen → JPEG');
+  print('1. Basic pipeline: resize + sharpen → JPEG');
   final gradientBytes = gradientFile.readAsBytesSync();
 
   final result = await ImagePipeline(gradientBytes)
@@ -52,11 +52,11 @@ Future<void> main() async {
   );
 
   // ─────────────────────────────────────
-  // 2. Motor de alto nivel: procesamiento rápido
+  // 2. High-level engine: quick processing
   // ─────────────────────────────────────
   print('2. Engine quick process: landscape → WebP thumbnail');
   final engine = JustImageEngine();
-  print('   Versión nativa: ${engine.nativeVersion}');
+  print('   Native version: ${engine.nativeVersion}');
 
   final landscapeBytes = File('$imgDir/landscape.bmp').readAsBytesSync();
   final thumb = await engine.process(
@@ -71,10 +71,10 @@ Future<void> main() async {
   print('   → ${thumb.width}x${thumb.height}, ${thumb.sizeInBytes} bytes\n');
 
   // ─────────────────────────────────────
-  // 3. Pipeline completo con múltiples efectos
+  // 3. Full pipeline with multiple effects
   // ─────────────────────────────────────
   print(
-    '3. Pipeline pro: crop + resize + HSL + brightness + contrast + sharpen',
+    '3. Pro pipeline: crop + resize + HSL + brightness + contrast + sharpen',
   );
   final checkerBytes = File('$imgDir/checkerboard.bmp').readAsBytesSync();
   final watermarkBytes = File('$imgDir/watermark.bmp').readAsBytesSync();
@@ -97,44 +97,44 @@ Future<void> main() async {
   print('   → ${pro.width}x${pro.height}, ${pro.sizeInBytes} bytes\n');
 
   // ─────────────────────────────────────
-  // 4. Efectos individuales
+  // 4. Individual effects
   // ─────────────────────────────────────
   final circlesBytes = File('$imgDir/circles.bmp').readAsBytesSync();
 
   // 4a. Gaussian Blur
-  print('4a. Efecto: Gaussian Blur (σ=3.0)');
+  print('4a. Effect: Gaussian Blur (σ=3.0)');
   final blurred = await ImagePipeline(
     circlesBytes,
   ).blur(3.0).toFormat(ImageFormat.png).execute();
   File('$outDir/04a_blur.png').writeAsBytesSync(blurred.data);
   print('   → ${blurred.width}x${blurred.height}\n');
 
-  // 4b. Detección de bordes (Sobel)
-  print('4b. Efecto: Detección de bordes Sobel');
+  // 4b. Edge detection (Sobel)
+  print('4b. Effect: Sobel Edge Detection');
   final edges = await ImagePipeline(
     circlesBytes,
   ).sobel().toFormat(ImageFormat.png).execute();
   File('$outDir/04b_edges.png').writeAsBytesSync(edges.data);
   print('   → ${edges.width}x${edges.height}\n');
 
-  // 4c. Rotación libre (45°)
-  print('4c. Transformación: Rotación 45°');
+  // 4c. Free-angle rotation (45°)
+  print('4c. Transform: 45° Rotation');
   final rotated = await ImagePipeline(
     gradientBytes,
   ).rotate(45).toFormat(ImageFormat.png).execute();
   File('$outDir/04c_rotated.png').writeAsBytesSync(rotated.data);
   print('   → ${rotated.width}x${rotated.height}\n');
 
-  // 4d. Flip horizontal
-  print('4d. Transformación: Flip horizontal');
+  // 4d. Horizontal flip
+  print('4d. Transform: Horizontal Flip');
   final flipped = await ImagePipeline(
     gradientBytes,
   ).flip(FlipDirection.horizontal).toFormat(ImageFormat.bmp).execute();
   File('$outDir/04d_flipped.bmp').writeAsBytesSync(flipped.data);
   print('   → ${flipped.width}x${flipped.height}\n');
 
-  // 4e. Ajuste de brillo
-  print('4e. Efecto: Brillo +30%');
+  // 4e. Brightness adjustment
+  print('4e. Effect: Brightness +30%');
   final bright = await ImagePipeline(
     landscapeBytes,
   ).brightness(0.3).toFormat(ImageFormat.png).execute();
@@ -142,9 +142,9 @@ Future<void> main() async {
   print('   → ${bright.width}x${bright.height}\n');
 
   // ─────────────────────────────────────
-  // 5. Batch Processing con prioridades
+  // 5. Batch processing with priorities
   // ─────────────────────────────────────
-  print('5. Batch processing: 3 imágenes en paralelo');
+  print('5. Batch processing: 3 images in parallel');
   final batch = engine.createBatch(concurrency: 3);
 
   final inputImages = [gradientBytes, landscapeBytes, circlesBytes];
@@ -162,10 +162,10 @@ Future<void> main() async {
   for (var i = 0; i < batchResults.length; i++) {
     File('$outDir/05_batch_$i.webp').writeAsBytesSync(batchResults[i].data);
   }
-  print('   → ${batchResults.length} imágenes procesadas\n');
+  print('   → ${batchResults.length} images processed\n');
 
-  // Tarea de alta prioridad
-  print('   Tarea crítica: thumbnail urgente');
+  // High-priority task
+  print('   Critical task: urgent thumbnail');
   final urgent = await batch.enqueue(
     ImagePipeline(gradientBytes).resize(32, 32).toFormat(ImageFormat.png),
     priority: TaskPriority.critical,
@@ -174,9 +174,9 @@ Future<void> main() async {
   print('   → ${urgent.width}x${urgent.height}\n');
 
   // ─────────────────────────────────────
-  // 6. Conversión entre formatos
+  // 6. Format conversion
   // ─────────────────────────────────────
-  print('6. Conversión de formatos: BMP → JPEG, PNG, WebP');
+  print('6. Format conversion: BMP → JPEG, PNG, WebP');
   for (final fmt in [ImageFormat.jpeg, ImageFormat.png, ImageFormat.webp]) {
     final converted = await ImagePipeline(
       gradientBytes,
@@ -187,8 +187,8 @@ Future<void> main() async {
   }
 
   print('\n═══════════════════════════════════════');
-  print('  ✅ Todos los ejemplos completados');
-  print('  📂 Resultados en: $outDir/');
+  print('  ✅ All examples completed');
+  print('  📂 Output saved to: $outDir/');
   print('═══════════════════════════════════════');
 
   engine.dispose();

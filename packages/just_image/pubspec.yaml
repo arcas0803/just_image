@@ -3,7 +3,7 @@ description: >-
   High-performance image processing engine powered by Rust FFI.
   Supports AVIF, WebP, JPEG, PNG, TIFF, BMP with zero-copy
   memory, SIMD acceleration, and professional metadata preservation.
-version: 1.0.0
+version: 1.0.1
 repository: https://github.com/just-image/just_image
 homepage: https://github.com/just-image/just_image
 topics:

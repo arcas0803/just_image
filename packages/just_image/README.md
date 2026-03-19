@@ -7,8 +7,10 @@ High-performance image processing engine for Dart, powered by a Rust FFI backend
 ## Features
 
 - **Formats**: AVIF, WebP (lossless/lossy), JPEG, PNG, TIFF, BMP
-- **Transforms**: Resize (Lanczos3), Crop, Rotate (free-angle), Flip
+- **Transforms**: Resize (Lanczos3), Crop, Rotate (free-angle), Flip, Thumbnail
 - **Effects**: Gaussian Blur, Unsharp Mask, Sobel edges, HSL adjust, Brightness/Contrast
+- **15 Artistic Filters**: vintage, sepia, cool, warm, marine, dramatic, lomo, retro, noir, bloom, polaroid, golden_hour, arctic, cinematic, fade
+- **BlurHash**: Encode images to compact placeholder strings and decode them back
 - **Watermark**: Alpha-composited overlay with position and opacity control
 - **Metadata**: EXIF auto-orientation, ICC profile preservation, metadata re-injection
 - **Performance**: Rust + rayon parallelism, SIMD (AVX2 / NEON)
@@ -50,6 +52,51 @@ final result = await ImagePipeline(imageBytes)
 File('output.avif').writeAsBytesSync(result.data);
 ```
 
+### Artistic filters
+
+```dart
+// Apply a single filter
+final result = await ImagePipeline(bytes)
+    .filter('cinematic')
+    .toFormat(ImageFormat.jpeg)
+    .quality(90)
+    .execute();
+
+// List all available filters
+final engine = JustImageEngine();
+print(engine.availableFilters);
+// [vintage, sepia, cool, warm, marine, dramatic, lomo, retro,
+//  noir, bloom, polaroid, golden_hour, arctic, cinematic, fade]
+```
+
+### Thumbnail generation
+
+```dart
+final thumb = await ImagePipeline(bytes)
+    .thumbnail(200, 200)
+    .toFormat(ImageFormat.webp)
+    .execute();
+// Aspect ratio is preserved — fits inside the 200×200 box
+```
+
+### BlurHash
+
+```dart
+final engine = JustImageEngine();
+
+// Encode: image → compact hash string
+final hash = await engine.blurHashEncode(imageBytes);
+print(hash); // e.g. "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+
+// Decode: hash string → placeholder PNG
+final placeholder = await engine.blurHashDecode(
+  hash,
+  width: 32,
+  height: 32,
+);
+File('placeholder.png').writeAsBytesSync(placeholder.data);
+```
+
 ### Transform & effects
 
 ```dart
@@ -83,26 +130,30 @@ final results = await Future.wait(futures);
 batch.dispose();
 ```
 
-### Image info
-
-```dart
-final bridge = NativeBridge();
-final info = bridge.imageInfo(bytes);
-print('${info.width}x${info.height}');
-```
-
 ## API reference
 
 ### ImagePipeline
 
 | Category | Methods |
 |---|---|
-| **Transform** | `resize(w, h)`, `crop(x, y, w, h)`, `rotate(degrees)`, `flip(direction)` |
+| **Transform** | `resize(w, h)`, `crop(x, y, w, h)`, `rotate(degrees)`, `flip(direction)`, `thumbnail(maxW, maxH)` |
 | **Effects** | `blur(sigma)`, `sharpen(amount, [threshold])`, `sobel()`, `brightness(v)`, `contrast(v)`, `hsl(hue, sat, light)` |
+| **Filters** | `filter(name)` — 15 built-in artistic filters |
 | **Watermark** | `watermark(bytes, x:, y:, opacity:)` |
 | **Output** | `toFormat(format)`, `quality(1-100)` |
 | **Config** | `autoOrient(bool)`, `preserveMetadata(bool)`, `preserveIcc(bool)` |
 | **Execution** | `execute()` (async, recommended), `executeSync()` (for isolates/CLI) |
+
+### JustImageEngine
+
+| Method | Description |
+|---|---|
+| `load(bytes)` | Create a pipeline from image bytes |
+| `createBatch(concurrency:)` | Create a parallel batch queue |
+| `availableFilters` | List of 15 built-in filter names |
+| `blurHashEncode(bytes, {componentsX, componentsY})` | Encode image to BlurHash string |
+| `blurHashDecode(hash, {width, height})` | Decode BlurHash to placeholder image |
+| `dispose()` | Release resources |
 
 ### Exception hierarchy
 

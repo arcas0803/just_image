@@ -14,12 +14,15 @@ Este repositorio se divide en tres paquetes independientes:
 
 ## Capacidades principales
 
-- Formatos soportados: AVIF, WebP, JPEG, PNG, TIFF y BMP
-- Transformaciones: resize, crop, rotate y flip
-- Efectos: blur, sharpen, sobel, brightness, contrast y HSL
-- Metadatos: orientación EXIF y preservación de ICC
-- Motor Rust con paralelismo y SIMD
-- Compilación nativa automática con Native Assets
+- **Formatos**: AVIF, WebP, JPEG, PNG, TIFF y BMP
+- **Transformaciones**: resize, crop, rotate, flip y thumbnail
+- **Efectos**: blur, sharpen, sobel, brightness, contrast y HSL
+- **15 filtros artísticos**: vintage, sepia, cool, warm, marine, dramatic, lomo, retro, noir, bloom, polaroid, golden_hour, arctic, cinematic, fade
+- **BlurHash**: codificación y decodificación de placeholders compactos
+- **Metadatos**: orientación EXIF y preservación de ICC
+- **Marca de agua**: overlay con posición y opacidad
+- **Motor Rust** con paralelismo (rayon) y SIMD
+- **Compilación nativa automática** con Native Assets
 
 > HEIC no está soportado actualmente.
 
@@ -28,6 +31,25 @@ Este repositorio se divide en tres paquetes independientes:
 - `just_image`: para proyectos Dart, servidores, herramientas y cualquier runtime Dart sin Flutter
 - `just_image_cli`: para uso desde terminal y scripts de automatización
 - `just_image_flutter`: para apps Flutter que quieran reutilizar la misma API de `just_image`
+
+## Ejemplo rápido
+
+```dart
+import 'package:just_image/just_image.dart';
+
+// Pipeline con filtro artístico y thumbnail
+final result = await ImagePipeline(imageBytes)
+    .filter('cinematic')
+    .thumbnail(400, 300)
+    .toFormat(ImageFormat.webp)
+    .quality(85)
+    .execute();
+
+// BlurHash para placeholders
+final engine = JustImageEngine();
+final hash = await engine.blurHashEncode(imageBytes);
+print(hash); // ej: "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+```
 
 ## Licencia
 

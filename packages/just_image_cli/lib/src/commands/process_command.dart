@@ -42,7 +42,12 @@ class ProcessCommand extends Command<void> {
       ..addOption('watermark', help: 'Watermark image path')
       ..addOption('watermark-x', defaultsTo: '0')
       ..addOption('watermark-y', defaultsTo: '0')
-      ..addOption('watermark-opacity', defaultsTo: '1.0');
+      ..addOption('watermark-opacity', defaultsTo: '1.0')
+      ..addOption(
+        'filter',
+        help: 'Apply artistic filter (e.g. vintage, sepia, cinematic)',
+      )
+      ..addOption('thumbnail', help: 'Generate thumbnail WxH (e.g. 200x200)');
   }
 
   @override
@@ -197,6 +202,31 @@ class ProcessCommand extends Command<void> {
         y: wmY,
         opacity: wmOpacity,
       );
+    }
+
+    // Filter
+    final filterName = argResults!['filter'] as String?;
+    if (filterName != null) {
+      pipeline = pipeline.filter(filterName);
+    }
+
+    // Thumbnail
+    final thumbnail = argResults!['thumbnail'] as String?;
+    if (thumbnail != null) {
+      final parts = thumbnail.split('x');
+      if (parts.length != 2) {
+        stderr.writeln('Error: --thumbnail must be WxH (e.g. 200x200)');
+        exitCode = 1;
+        return;
+      }
+      final w = int.tryParse(parts[0]);
+      final h = int.tryParse(parts[1]);
+      if (w == null || h == null || w <= 0 || h <= 0) {
+        stderr.writeln('Error: Invalid thumbnail dimensions');
+        exitCode = 1;
+        return;
+      }
+      pipeline = pipeline.thumbnail(w, h);
     }
 
     // Execute

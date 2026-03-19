@@ -6,7 +6,7 @@ import 'image_format.dart';
 import 'image_pipeline.dart';
 import 'image_result.dart';
 
-/// Tarea de procesamiento en la cola con prioridad.
+/// Internal task wrapper with priority for the batch queue.
 class _BatchTask implements Comparable<_BatchTask> {
   final int id;
   final TaskPriority priority;
@@ -22,31 +22,33 @@ class _BatchTask implements Comparable<_BatchTask> {
 
   @override
   int compareTo(_BatchTask other) {
-    // Mayor prioridad primero
+    // Higher priority first.
     final cmp = other.priority.value.compareTo(priority.value);
     if (cmp != 0) return cmp;
-    // FIFO para misma prioridad
+    // FIFO within the same priority level.
     return id.compareTo(other.id);
   }
 }
 
-/// Cola de procesamiento por lotes con prioridades.
+/// Priority-based batch processing queue.
 ///
-/// Permite encolar múltiples imágenes y procesarlas en paralelo,
-/// aprovechando el pool de hilos de Rust (rayon) en background isolates.
+/// Enqueue multiple images and process them in parallel, leveraging
+/// the Rust thread pool (rayon) inside background isolates.
 ///
 /// ```dart
 /// final queue = BatchQueue(concurrency: 4);
+///
 /// final futures = images.map((bytes) =>
 ///   queue.enqueue(
 ///     ImagePipeline(bytes).resize(800, 600).toFormat(ImageFormat.webp),
 ///   ),
 /// );
+///
 /// final results = await Future.wait(futures);
 /// queue.dispose();
 /// ```
 class BatchQueue {
-  /// Número máximo de tareas ejecutándose en paralelo.
+  /// Maximum number of tasks running in parallel.
   final int concurrency;
 
   final SplayTreeSet<_BatchTask> _queue = SplayTreeSet<_BatchTask>();
@@ -56,8 +58,20 @@ class BatchQueue {
 
   BatchQueue({this.concurrency = 4});
 
-  /// Encola un pipeline para procesamiento.
-  /// Devuelve un Future que se completa cuando la tarea finaliza.
+  /// Enqueues a pipeline for processing.
+  ///
+  /// Returns a [Future] that completes with the result once the task
+  /// finishes. Tasks are scheduled according to [priority].
+  ///
+  /// Throws [BatchQueueDisposedException] if the queue has already
+  /// been disposed.
+  ///
+  /// ```dart
+  /// final result = await queue.enqueue(
+  ///   ImagePipeline(bytes).resize(800, 600),
+  ///   priority: TaskPriority.high,
+  /// );
+  /// ```
   Future<ImageResult> enqueue(
     ImagePipeline pipeline, {
     TaskPriority priority = TaskPriority.normal,
@@ -80,7 +94,7 @@ class BatchQueue {
     return completer.future;
   }
 
-  /// Procesa la siguiente tarea en la cola si hay capacidad.
+  /// Processes the next task if there is available capacity.
   void _processNext() {
     while (_runningCount < concurrency && _queue.isNotEmpty) {
       final task = _queue.first;
@@ -104,17 +118,20 @@ class BatchQueue {
     }
   }
 
-  /// Número de tareas pendientes en cola.
+  /// Number of tasks waiting in the queue.
   int get pendingCount => _queue.length;
 
-  /// Número de tareas ejecutándose actualmente.
+  /// Number of tasks currently being executed.
   int get runningCount => _runningCount;
 
-  /// Indica si la cola ha sido desechada.
+  /// Whether this queue has been disposed.
   bool get isDisposed => _disposed;
 
-  /// Libera la cola. Las tareas en ejecución continuarán pero no se
-  /// iniciarán nuevas. Las tareas pendientes se cancelan con error.
+  /// Disposes the queue.
+  ///
+  /// Tasks that are already running will finish, but no new tasks
+  /// will be started. Pending tasks are cancelled with a
+  /// [TaskCancelledException].
   void dispose() {
     _disposed = true;
     for (final task in _queue) {

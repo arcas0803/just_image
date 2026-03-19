@@ -1,4 +1,8 @@
-/// Formatos de imagen soportados por el motor.
+/// Image formats supported by the engine.
+///
+/// ```dart
+/// pipeline.toFormat(ImageFormat.webp).quality(85);
+/// ```
 enum ImageFormat {
   jpeg('jpeg'),
   png('png'),
@@ -11,10 +15,12 @@ enum ImageFormat {
   final String value;
 }
 
-/// Tipo de flip.
+/// Flip direction.
 enum FlipDirection { horizontal, vertical }
 
-/// Prioridad para el batch queue.
+/// Task priority for the batch queue.
+///
+/// Higher-priority tasks are dequeued first.
 enum TaskPriority implements Comparable<TaskPriority> {
   low(0),
   normal(1),

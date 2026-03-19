@@ -2,7 +2,7 @@ name: just_image_cli
 description: >-
   Command-line tool for just_image. Process, resize, convert, and
   inspect images from the terminal.
-version: 1.0.0
+version: 1.0.1
 repository: https://github.com/just-image/just_image
 homepage: https://github.com/just-image/just_image
 topics:

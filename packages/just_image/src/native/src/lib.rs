@@ -6,3 +6,6 @@ pub mod color;
 pub mod formats;
 pub mod transforms;
 pub mod watermark;
+pub mod filters;
+pub mod thumbnail;
+pub mod blurhash_bridge;

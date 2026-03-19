@@ -1,17 +1,23 @@
 import 'dart:typed_data';
 
-/// Resultado inmutable de una operación de procesamiento de imagen.
+/// Immutable result of an image processing operation.
+///
+/// ```dart
+/// final result = await pipeline.execute();
+/// print('${result.width}x${result.height}, ${result.sizeInBytes} bytes');
+/// File('output.jpg').writeAsBytesSync(result.data);
+/// ```
 final class ImageResult {
-  /// Bytes codificados de la imagen resultante.
+  /// Encoded bytes of the resulting image.
   final Uint8List data;
 
-  /// Ancho de la imagen resultante en píxeles.
+  /// Width of the resulting image in pixels.
   final int width;
 
-  /// Alto de la imagen resultante en píxeles.
+  /// Height of the resulting image in pixels.
   final int height;
 
-  /// Formato de salida utilizado.
+  /// Output format used (e.g. `"jpeg"`, `"png"`, `"webp"`).
   final String format;
 
   const ImageResult({
@@ -21,6 +27,6 @@ final class ImageResult {
     required this.format,
   });
 
-  /// Tamaño en bytes de la imagen resultante.
+  /// Size of the resulting image data in bytes.
   int get sizeInBytes => data.length;
 }

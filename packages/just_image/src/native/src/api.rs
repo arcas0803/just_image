@@ -9,10 +9,13 @@ use std::slice;
 
 use image::GenericImageView;
 
+use crate::blurhash_bridge;
 use crate::effects;
+use crate::filters;
 use crate::formats;
 use crate::metadata;
 use crate::pipeline::{Operation, PipelineConfig};
+use crate::thumbnail;
 use crate::transforms;
 use crate::watermark;
 
@@ -212,6 +215,11 @@ fn apply_operation(
             let wm_data = unsafe { slice::from_raw_parts(watermark_ptr, watermark_len) };
             watermark::apply_watermark(img, wm_data, *x, *y, *opacity)
         }
+        Operation::Filter { name } => filters::apply_filter(img, name),
+        Operation::Thumbnail {
+            max_width,
+            max_height,
+        } => Ok(thumbnail::generate_thumbnail(img, *max_width, *max_height)),
     }
 }
 
@@ -301,4 +309,82 @@ pub unsafe extern "C" fn rust_image_info(
         }
         Err(e) => FfiResult::error(&e),
     }
+}
+
+// ──────────────────────────────────────────────
+// BlurHash
+// ──────────────────────────────────────────────
+
+/// Codifica una imagen a BlurHash string.
+/// El resultado se devuelve como bytes UTF-8 en `FfiResult.data`.
+///
+/// # Safety
+/// - `input_ptr` debe apuntar a `input_len` bytes válidos de una imagen.
+#[no_mangle]
+pub unsafe extern "C" fn rust_blurhash_encode(
+    input_ptr: *const u8,
+    input_len: usize,
+    components_x: u32,
+    components_y: u32,
+) -> FfiResult {
+    if input_ptr.is_null() || input_len == 0 {
+        return FfiResult::error("Null or empty input buffer");
+    }
+
+    let input_data = slice::from_raw_parts(input_ptr, input_len);
+
+    let img = match formats::decode_image(input_data) {
+        Ok(img) => img,
+        Err(e) => return FfiResult::error(&e),
+    };
+
+    match blurhash_bridge::encode_blurhash(&img, components_x, components_y) {
+        Ok(hash) => {
+            let hash_bytes = hash.into_bytes();
+            let (w, h) = img.dimensions();
+            FfiResult::success(hash_bytes, w, h)
+        }
+        Err(e) => FfiResult::error(&e),
+    }
+}
+
+/// Decodifica un BlurHash string a una imagen PNG.
+/// El resultado se devuelve como bytes PNG en `FfiResult.data`.
+///
+/// # Safety
+/// - `hash_ptr` debe ser un C-string UTF-8 válido.
+#[no_mangle]
+pub unsafe extern "C" fn rust_blurhash_decode(
+    hash_ptr: *const c_char,
+    width: u32,
+    height: u32,
+) -> FfiResult {
+    if hash_ptr.is_null() {
+        return FfiResult::error("Null BlurHash string");
+    }
+
+    let hash_str = match CStr::from_ptr(hash_ptr).to_str() {
+        Ok(s) => s,
+        Err(_) => return FfiResult::error("Invalid UTF-8 in BlurHash string"),
+    };
+
+    match blurhash_bridge::decode_blurhash(hash_str, width, height) {
+        Ok(img) => {
+            // Codificar como PNG para devolver a Dart
+            match formats::encode_to_format(&img, "png", 100) {
+                Ok(png_bytes) => FfiResult::success(png_bytes, width, height),
+                Err(e) => FfiResult::error(&e),
+            }
+        }
+        Err(e) => FfiResult::error(&e),
+    }
+}
+
+/// Devuelve los nombres de los filtros disponibles como JSON array string.
+#[no_mangle]
+pub extern "C" fn rust_available_filters() -> *mut c_char {
+    let names = filters::available_filters();
+    let json = serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string());
+    let c_str = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
+    c_str.into_raw()
 }

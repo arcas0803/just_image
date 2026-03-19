@@ -66,12 +66,24 @@ void main() {
           .brightness(0.1)
           .contrast(-0.1)
           .hsl(hue: 30, saturation: 0.2, lightness: -0.1)
+          .filter('vintage')
+          .thumbnail(200, 200)
           .toFormat(ImageFormat.avif)
           .quality(90)
           .autoOrient(true)
           .preserveMetadata(true)
           .preserveIcc(true);
 
+      expect(pipeline, isA<ImagePipeline>());
+    });
+
+    test('filter is chainable', () {
+      final pipeline = ImagePipeline(Uint8List(10)).filter('sepia');
+      expect(pipeline, isA<ImagePipeline>());
+    });
+
+    test('thumbnail is chainable', () {
+      final pipeline = ImagePipeline(Uint8List(10)).thumbnail(150, 150);
       expect(pipeline, isA<ImagePipeline>());
     });
   });

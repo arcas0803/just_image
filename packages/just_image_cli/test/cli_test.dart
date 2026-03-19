@@ -18,6 +18,14 @@ void main() {
       expect(runner.commands.containsKey('info'), isTrue);
     });
 
+    test('has filters command', () {
+      expect(runner.commands.containsKey('filters'), isTrue);
+    });
+
+    test('has blurhash command', () {
+      expect(runner.commands.containsKey('blurhash'), isTrue);
+    });
+
     test('help does not throw', () async {
       await expectLater(runner.run(['--help']), completes);
     });

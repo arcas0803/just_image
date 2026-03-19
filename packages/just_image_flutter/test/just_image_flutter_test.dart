@@ -30,6 +30,13 @@ void main() {
       expect(pipeline, isA<ImagePipeline>());
     });
 
+    test('filter and thumbnail are chainable', () {
+      final pipeline = ImagePipeline(
+        Uint8List(10),
+      ).filter('vintage').thumbnail(200, 200);
+      expect(pipeline, isA<ImagePipeline>());
+    });
+
     test('JustImageEngine is constructible', () {
       // JustImageEngine loads the native library via FFI.
       // In unit-test mode the Rust dylib may not be compiled,

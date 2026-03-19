@@ -50,6 +50,10 @@ pub enum Operation {
         y: i32,
         opacity: f32,
     },
+    #[serde(rename = "filter")]
+    Filter { name: String },
+    #[serde(rename = "thumbnail")]
+    Thumbnail { max_width: u32, max_height: u32 },
 }
 
 impl Default for PipelineConfig {

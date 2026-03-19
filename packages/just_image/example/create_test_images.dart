@@ -1,5 +1,5 @@
-/// Generador de imágenes de prueba para los ejemplos de just_image.
-/// Ejecutar: dart run example/create_test_images.dart
+/// Test image generator for just_image examples.
+/// Run: dart run example/create_test_images.dart
 library;
 
 import 'dart:io';
@@ -10,7 +10,7 @@ void main() {
   final dir = Directory('example/images');
   if (!dir.existsSync()) dir.createSync(recursive: true);
 
-  // 1. Imagen con degradado rojo-azul (200x150)
+  // 1. Red-blue gradient image (200x150)
   _writeBmp24('example/images/gradient.bmp', 200, 150, (x, y, w, h) {
     final r = (x / w * 255).round();
     final g = 50;
@@ -19,7 +19,7 @@ void main() {
   });
   print('✓ gradient.bmp (200x150)');
 
-  // 2. Imagen con patrón de tablero de ajedrez (160x160)
+  // 2. Checkerboard pattern image (160x160)
   _writeBmp24('example/images/checkerboard.bmp', 160, 160, (x, y, w, h) {
     final cellSize = 20;
     final isWhite = ((x ~/ cellSize) + (y ~/ cellSize)) % 2 == 0;
@@ -27,15 +27,15 @@ void main() {
   });
   print('✓ checkerboard.bmp (160x160)');
 
-  // 3. Imagen paisaje simulado con cielo y suelo (320x240)
+  // 3. Simulated landscape with sky and ground (320x240)
   _writeBmp24('example/images/landscape.bmp', 320, 240, (x, y, w, h) {
     final ny = y / h;
     if (ny < 0.5) {
-      // Cielo: degradado azul
+      // Sky: blue gradient
       final t = ny / 0.5;
       return ((135 + t * 70).round(), (206 + t * 30).round(), 235);
     } else {
-      // Suelo: verde con variación
+      // Ground: green with variation
       final t = (ny - 0.5) / 0.5;
       final noise = (sin(x * 0.3) * 15).round();
       return (
@@ -47,7 +47,7 @@ void main() {
   });
   print('✓ landscape.bmp (320x240)');
 
-  // 4. Imagen con círculos concéntricos (200x200)
+  // 4. Concentric circles image (200x200)
   _writeBmp24('example/images/circles.bmp', 200, 200, (x, y, w, h) {
     final cx = w / 2, cy = h / 2;
     final dist = sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
@@ -60,17 +60,17 @@ void main() {
   });
   print('✓ circles.bmp (200x200)');
 
-  // 5. Imagen para usar como watermark (80x30) — fondo oscuro con banda clara
+  // 5. Watermark overlay image (80x30) — dark background with light band
   _writeBmp24('example/images/watermark.bmp', 80, 30, (x, y, w, h) {
     final inBand = y >= 8 && y <= 22 && x >= 5 && x <= 75;
     return inBand ? (255, 255, 255) : (40, 40, 40);
   });
   print('✓ watermark.bmp (80x30)');
 
-  print('\n✅ Todas las imágenes creadas en example/images/');
+  print('\n✅ All test images created in example/images/');
 }
 
-/// Escribe una imagen BMP de 24 bits (sin compresión).
+/// Writes a 24-bit BMP image (uncompressed).
 void _writeBmp24(
   String path,
   int width,
