@@ -21,9 +21,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # For publishing, change to: just_image: ^1.0.0
-  just_image:
-    path: ../just_image
+  just_image: ^1.0.0
 
 dev_dependencies:
   flutter_test:

@@ -18,9 +18,7 @@ environment:
 
 dependencies:
   args: ^2.6.0
-  # For publishing, change to: just_image: ^1.0.0
-  just_image:
-    path: ../just_image
+  just_image: ^1.0.0
 
 dev_dependencies:
   lints: ^6.0.0
