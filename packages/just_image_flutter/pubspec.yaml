@@ -1,0 +1,45 @@
+name: just_image_flutter
+description: >-
+  Zero-config Flutter plugin for just_image. Bridges the Rust-powered
+  image processing engine to Flutter apps on Android, iOS, macOS,
+  Linux, and Windows via Native Assets. Pure FFI linking — no widgets.
+version: 1.0.0
+repository: https://github.com/just-image/just_image
+homepage: https://github.com/just-image/just_image
+topics:
+  - image
+  - image-processing
+  - flutter
+  - ffi
+
+resolution: workspace
+
+environment:
+  sdk: ^3.10.8
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # For publishing, change to: just_image: ^1.0.0
+  just_image:
+    path: ../just_image
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true

@@ -1,0 +1,42 @@
+name: Publish to pub.dev
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  id-token: write # Required for pub.dev authentication
+
+jobs:
+  # ─────────────────────────────────────
+  # Publish each package
+  # ─────────────────────────────────────
+  publish:
+    name: Publish packages to pub.dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      # Publish order matters: just_image first (dependency of the others)
+      - name: Publish just_image
+        working-directory: packages/just_image
+        run: dart pub publish --force
+
+      - name: Publish just_image_cli
+        working-directory: packages/just_image_cli
+        run: dart pub publish --force
+
+      - name: Publish just_image_flutter
+        working-directory: packages/just_image_flutter
+        run: dart pub publish --force

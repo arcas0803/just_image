@@ -1,0 +1,59 @@
+name: just_image_workspace
+
+packages:
+  - packages/*
+
+command:
+  version:
+    linkToCommits: true
+    workspaceChangelog: true
+  publish:
+    hooks:
+      pre: melos run analyze
+
+scripts:
+  analyze:
+    description: Run dart analyze across all packages
+    run: dart analyze --fatal-infos
+    exec:
+      concurrency: 1
+
+  test:
+    description: Run tests across all packages
+    run: dart test
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: test
+
+  test:flutter:
+    description: Run Flutter tests
+    run: flutter test
+    exec:
+      concurrency: 1
+    packageFilters:
+      dependsOn: flutter
+
+  format:
+    description: Check Dart formatting
+    run: dart format --set-exit-if-changed .
+    exec:
+      concurrency: 1
+
+  build:rust:
+    description: Build the Rust native library (release)
+    run: cd packages/just_image/src/native && cargo build --release
+
+  publish:check:
+    description: Dry-run publish for all publishable packages
+    run: dart pub publish --dry-run
+    exec:
+      concurrency: 1
+    packageFilters:
+      noPrivate: true
+
+  clean:
+    description: Clean all packages
+    run: dart pub get
+    exec:
+      concurrency: 5

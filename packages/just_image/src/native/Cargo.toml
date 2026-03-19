@@ -1,0 +1,37 @@
+[package]
+name = "just_image_native"
+version = "1.0.0"
+edition = "2021"
+authors = ["just_image contributors"]
+description = "High-performance image processing core for just_image Dart package"
+
+[lib]
+name = "just_image_native"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+image = { version = "0.25", features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "avif"] }
+rayon = "1.10"
+kamadak-exif = "0.5"
+oxipng = { version = "9", features = ["parallel"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+webp = "0.3"
+ravif = "0.11"
+rgb = "0.8"
+lcms2 = "6"
+fast_image_resize = { version = "4", features = ["image"] }
+imageproc = "0.25"
+ab_glyph = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.release.build-override]
+opt-level = 3
+
+

@@ -1,0 +1,14 @@
+name: just_image_workspace
+description: Monorepo workspace for just_image packages.
+publish_to: none
+
+environment:
+  sdk: ^3.10.8
+
+workspace:
+  - packages/just_image
+  - packages/just_image_cli
+  - packages/just_image_flutter
+
+dev_dependencies:
+  melos: ^6.1.0
