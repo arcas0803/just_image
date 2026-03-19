@@ -18,15 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
+          channel: stable
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: dart pub get
+        run: flutter pub get
 
       # Publish order matters: just_image first (dependency of the others)
       - name: Publish just_image
@@ -39,4 +39,4 @@ jobs:
 
       - name: Publish just_image_flutter
         working-directory: packages/just_image_flutter
-        run: dart pub publish --force
+        run: flutter pub publish --force
