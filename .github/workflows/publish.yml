@@ -6,27 +6,43 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
-  # ─────────────────────────────────────
-  # Publish each package
-  # ─────────────────────────────────────
   publish:
-    name: Publish packages to pub.dev
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # OIDC token for pub.dev automated publishing
-      contents: read     # Required for actions/checkout
+      id-token: write  # Required for authentication with pub.dev
     steps:
       - uses: actions/checkout@v4
 
+      # Flutter SDK (needed for workspace resolution — workspace includes Flutter packages)
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+
+      # Dart SDK AFTER Flutter so its `dart` binary takes priority in PATH.
+      # dart-lang/setup-dart enables OIDC token exchange for pub.dev publishing.
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Run tests
+        working-directory: packages/just_image
+        run: dart test
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          PUBSPEC_VERSION=$(grep '^version:' packages/just_image/pubspec.yaml | cut -d' ' -f2)
+          if [ "$TAG_VERSION" != "$PUBSPEC_VERSION" ]; then
+            echo "Error: Tag version ($TAG_VERSION) does not match pubspec version ($PUBSPEC_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
 
       # Publish order matters: just_image first (dependency of the others)
       - name: Publish just_image
@@ -39,4 +55,4 @@ jobs:
 
       - name: Publish just_image_flutter
         working-directory: packages/just_image_flutter
-        run: flutter pub publish --force
+        run: dart pub publish --force
