@@ -16,3 +16,6 @@ pubspec.lock
 
 # macOS
 .DS_Store
+
+# Flutter/Dart build output
+build/

@@ -37,12 +37,14 @@ jobs:
       - name: Verify version matches tag
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          PUBSPEC_VERSION=$(grep '^version:' packages/just_image/pubspec.yaml | cut -d' ' -f2)
-          if [ "$TAG_VERSION" != "$PUBSPEC_VERSION" ]; then
-            echo "Error: Tag version ($TAG_VERSION) does not match pubspec version ($PUBSPEC_VERSION)"
-            exit 1
-          fi
-          echo "Version verified: $TAG_VERSION"
+          for pkg in just_image just_image_cli just_image_flutter; do
+            PKG_VERSION=$(grep '^version:' packages/$pkg/pubspec.yaml | cut -d' ' -f2)
+            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+              echo "Error: Tag version ($TAG_VERSION) does not match $pkg version ($PKG_VERSION)"
+              exit 1
+            fi
+            echo "Version verified for $pkg: $TAG_VERSION"
+          done
 
       # Publish order matters: just_image first (dependency of the others)
       - name: Publish just_image

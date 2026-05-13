@@ -1,3 +1,7 @@
+## 1.0.2
+
+- Updated dependency to `just_image ^1.0.2`.
+
 ## 1.0.1
 
 - `--filter` option: apply artistic filters from the command line.
