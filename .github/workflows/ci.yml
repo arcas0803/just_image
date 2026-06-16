@@ -47,7 +47,7 @@ jobs:
         run: cargo build --release
 
   # ─────────────────────────────────────
-  # Dart: analyze + test (monorepo)
+  # Dart: analyze + test
   # ─────────────────────────────────────
   dart-check:
     name: Dart Analyze & Test
@@ -70,15 +70,16 @@ jobs:
         working-directory: packages/just_image/src/native
         run: cargo build --release
 
-      - name: Install dependencies (workspace)
+      - name: Install dependencies
+        working-directory: packages/just_image
         run: dart pub get
 
-      - name: Analyze all packages
-        run: |
-          cd packages/just_image && dart analyze --fatal-infos && cd ../..
-          cd packages/just_image_cli && dart analyze --fatal-infos && cd ../..
+      - name: Analyze
+        working-directory: packages/just_image
+        run: dart analyze --fatal-infos
 
       - name: Format check
+        working-directory: packages/just_image
         run: dart format --output=none --set-exit-if-changed .
 
       - name: Test just_image
@@ -88,48 +89,12 @@ jobs:
           LD_LIBRARY_PATH: src/native/target/release
           DYLD_LIBRARY_PATH: src/native/target/release
 
-      - name: Test just_image_cli
-        working-directory: packages/just_image_cli
-        run: dart test
-
-  # ─────────────────────────────────────
-  # Flutter: analyze + test
-  # ─────────────────────────────────────
-  flutter-check:
-    name: Flutter Analyze & Test
-    needs: rust-check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        working-directory: packages/just_image_flutter
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: packages/just_image_flutter
-        run: flutter analyze
-
-      - name: Test
-        working-directory: packages/just_image_flutter
-        run: flutter test
-
   # ─────────────────────────────────────
   # Dry-run publish
   # ─────────────────────────────────────
   publish-dry-run:
     name: Publish Dry Run
-    needs: [dart-check, flutter-check]
+    needs: dart-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,12 +106,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - run: dart pub get
+      - name: Install dependencies
+        working-directory: packages/just_image
+        run: dart pub get
 
       - name: Dry run - just_image
         working-directory: packages/just_image
-        run: dart pub publish --dry-run
-
-      - name: Dry run - just_image_cli
-        working-directory: packages/just_image_cli
         run: dart pub publish --dry-run

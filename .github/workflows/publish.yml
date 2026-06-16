@@ -13,13 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Flutter SDK (needed for workspace resolution — workspace includes Flutter packages)
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      # Dart SDK AFTER Flutter so its `dart` binary takes priority in PATH.
-      # dart-lang/setup-dart enables OIDC token exchange for pub.dev publishing.
+      # Dart SDK with OIDC token exchange for pub.dev publishing.
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
@@ -28,33 +22,24 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: flutter pub get
+        working-directory: packages/just_image
+        run: dart pub get
 
       - name: Run tests
         working-directory: packages/just_image
         run: dart test
 
       - name: Verify version matches tag
+        working-directory: packages/just_image
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          for pkg in just_image just_image_cli just_image_flutter; do
-            PKG_VERSION=$(grep '^version:' packages/$pkg/pubspec.yaml | cut -d' ' -f2)
-            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-              echo "Error: Tag version ($TAG_VERSION) does not match $pkg version ($PKG_VERSION)"
-              exit 1
-            fi
-            echo "Version verified for $pkg: $TAG_VERSION"
-          done
+          PKG_VERSION=$(grep '^version:' pubspec.yaml | cut -d' ' -f2)
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Error: Tag version ($TAG_VERSION) does not match package version ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $TAG_VERSION"
 
-      # Publish order matters: just_image first (dependency of the others)
       - name: Publish just_image
         working-directory: packages/just_image
         run: dart pub publish --force
-
-      - name: Publish just_image_cli (discontinued)
-        working-directory: packages/just_image_cli
-        run: dart pub publish --force --discontinued
-
-      - name: Publish just_image_flutter (discontinued)
-        working-directory: packages/just_image_flutter
-        run: dart pub publish --force --discontinued

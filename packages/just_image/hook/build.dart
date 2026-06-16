@@ -378,6 +378,12 @@ void _applyCCompilerConfig(
 }
 
 /// Configures Android NDK toolchain environment variables.
+///
+/// Picks an existing compiler for each Rust target, falling back from the
+/// requested NDK API level to the unversioned clang and finally to the
+/// highest available API level. This avoids failures when the installed NDK
+/// does not include a compiler for the exact API level requested by the
+/// build environment.
 void _configureAndroid(Map<String, String> env, CodeConfig code) {
   final ndkHome = _findNdkHome();
   if (ndkHome == null) {
@@ -387,12 +393,19 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
     );
   }
 
-  final apiLevel = code.android.targetNdkApi.toString();
+  final requestedApi = code.android.targetNdkApi;
   final hostTag = _ndkHostTag();
 
   var toolchain = '$ndkHome/toolchains/llvm/prebuilt/$hostTag/bin';
   if (!Directory(toolchain).existsSync() && hostTag == 'darwin-arm64') {
     toolchain = '$ndkHome/toolchains/llvm/prebuilt/darwin-x86_64/bin';
+  }
+
+  if (!Directory(toolchain).existsSync()) {
+    throw Exception(
+      'Android NDK toolchain directory not found: $toolchain. '
+      'Ensure the NDK is installed and $hostTag is supported.',
+    );
   }
 
   env['ANDROID_NDK_HOME'] = ndkHome;
@@ -405,12 +418,68 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
 
   for (final (rustTarget, clangPrefix) in targets) {
     final targetEnv = rustTarget.toUpperCase().replaceAll('-', '_');
-    env['CARGO_TARGET_${targetEnv}_LINKER'] =
-        '$toolchain/$clangPrefix$apiLevel-clang';
-    env['CC_$targetEnv'] = '$toolchain/$clangPrefix$apiLevel-clang';
-    env['CXX_$targetEnv'] = '$toolchain/$clangPrefix$apiLevel-clang++';
-    env['AR_$targetEnv'] = '$toolchain/llvm-ar';
+
+    final compiler = _findAndroidCompiler(toolchain, clangPrefix, requestedApi);
+    if (compiler == null) {
+      throw Exception(
+        'Could not find an Android clang compiler for $rustTarget in '
+        '$toolchain. Tried $clangPrefix$requestedApi-clang, '
+        '$clangPrefix-clang, and $clangPrefix<api>-clang.',
+      );
+    }
+
+    // The C++ compiler is the same binary with a '++' suffix. Recent NDKs
+    // provide both clang and clang++ front-ends.
+    final cxxCompiler = '$compiler++';
+    final cxxCompilerFile = File(cxxCompiler);
+
+    env['CARGO_TARGET_${targetEnv}_LINKER'] = compiler;
+    env['CC_$targetEnv'] = compiler;
+    env['CXX_$targetEnv'] = cxxCompilerFile.existsSync() ? cxxCompiler : compiler;
+
+    final ar = '$toolchain/llvm-ar';
+    env['AR_$targetEnv'] = File(ar).existsSync() ? ar : 'llvm-ar';
   }
+}
+
+/// Finds a working Android clang compiler in [toolchainDir] for [clangPrefix].
+///
+/// Tries, in order:
+/// 1. `$clangPrefix<requestedApi>-clang`
+/// 2. `$clangPrefix-clang` (unversioned symlink)
+/// 3. The highest available `$clangPrefix<api>-clang`
+String? _findAndroidCompiler(
+  String toolchainDir,
+  String clangPrefix,
+  int requestedApi,
+) {
+  final candidates = <String>[
+    '$toolchainDir/$clangPrefix$requestedApi-clang',
+    '$toolchainDir/$clangPrefix-clang',
+  ];
+
+  // Find all versioned compilers and pick the highest API level as a fallback.
+  final dir = Directory(toolchainDir);
+  if (dir.existsSync()) {
+    final versioned = dir
+        .listSync()
+        .whereType<File>()
+        .map((f) => f.path)
+        .where(
+          (p) =>
+              p.startsWith('$toolchainDir/$clangPrefix') &&
+              p.endsWith('-clang') &&
+              p != '$toolchainDir/$clangPrefix-clang',
+        )
+        .toList();
+    versioned.sort();
+    candidates.addAll(versioned.reversed);
+  }
+
+  for (final candidate in candidates) {
+    if (File(candidate).existsSync()) return candidate;
+  }
+  return null;
 }
 
 /// Locates the Android NDK installation directory.

@@ -1,3 +1,8 @@
+## 1.0.5
+
+- Fixed Android NDK compiler detection: fall back from the requested API level to the unversioned `*-clang` symlink, then to the highest available API-level compiler.
+- Removed discontinued `just_image_cli` and `just_image_flutter` packages from the repository.
+
 ## 1.0.4
 
 - Migrated Native Assets build hook to `package:hooks` + `package:code_assets`.

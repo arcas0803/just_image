@@ -4,15 +4,9 @@ Monorepo de procesamiento de imágenes para Dart y Flutter, impulsado por un nú
 
 ## Qué incluye
 
-Este repositorio se divide en tres paquetes:
+Este repositorio contiene el paquete [`just_image`](packages/just_image/): el núcleo de la librería de procesamiento de imágenes. Expone la API de procesamiento, el puente FFI y la compilación nativa automática para cualquier entorno Dart (CLI, servidores, Flutter, etc.) gracias a su `hook/build.dart` de Native Assets.
 
-| Paquete | Rol | Estado |
-|---|---|---|
-| [`just_image`](packages/just_image/) | Núcleo de la librería. Expone la API de procesamiento, el puente FFI y la compilación nativa automática. | **Activo** — punto de entrada único para Dart y Flutter |
-| [`just_image_cli`](packages/just_image_cli/) | Interfaz de línea de comandos para convertir, transformar e inspeccionar imágenes desde terminal. | **Discontinuado** — usar `just_image` directamente |
-| [`just_image_flutter`](packages/just_image_flutter/) | Plugin Flutter sin widgets ni UI. Solo activaba `ffiPlugin: true` para que Flutter empaquetara el binario nativo. | **Discontinuado** — usar `just_image` directamente |
-
-> Los paquetes `just_image_cli` e `just_image_flutter` se marcarán como **discontinuados** en pub.dev en su siguiente publicación. El paquete `just_image` ahora es el único punto de entrada y funciona directamente en cualquier entorno Dart (CLI, servidores, Flutter, etc.) gracias a su `hook/build.dart` de Native Assets.
+> Los antiguos paquetes `just_image_cli` e `just_image_flutter` han sido **discontinuados** en pub.dev; se usa `just_image` directamente.
 
 ## Capacidades principales
 
@@ -28,11 +22,9 @@ Este repositorio se divide en tres paquetes:
 
 > HEIC no está soportado actualmente.
 
-## Cómo se usa cada paquete
+## Uso
 
-- `just_image`: para proyectos Dart, servidores, herramientas **y apps Flutter**. Es el único paquete necesario.
-- `just_image_cli`: **discontinuado**. Para nuevas herramientas de terminal, depende de `just_image` directamente.
-- `just_image_flutter`: **discontinuado**. Para nuevas apps Flutter, depende de `just_image` directamente.
+`just_image` es el único paquete necesario para proyectos Dart, servidores, herramientas **y apps Flutter**.
 
 ## Ejemplo rápido
 

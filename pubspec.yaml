@@ -7,6 +7,3 @@ environment:
 
 workspace:
   - packages/just_image
-  - packages/just_image_cli
-  - packages/just_image_flutter
-  - packages/just_image_flutter/example
