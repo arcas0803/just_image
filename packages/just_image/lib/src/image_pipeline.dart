@@ -1,396 +1,323 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'exceptions.dart';
-import 'image_format.dart';
-import 'image_result.dart';
-import 'native_bridge.dart';
+import 'package:cross_file/cross_file.dart';
 
-/// Fluent, chainable image processing pipeline.
+import 'artistic_filter.dart';
+import 'exceptions.dart';
+import 'image_result.dart';
+import 'image_source.dart';
+import 'native_bridge.dart';
+import 'output_config.dart';
+
+/// Immutable, chainable image processing pipeline.
 ///
 /// Build a sequence of operations and execute them in one pass through
-/// the Rust native engine. Every method returns `this`, so you can
-/// chain calls naturally.
+/// the Rust native engine. Every method returns a new [ImagePipeline]
+/// instance, so pipelines can be reused and composed.
 ///
 /// ```dart
-/// final result = await ImagePipeline(bytes)
+/// final result = await File('photo.jpg')
+///     .justImage
 ///     .resize(1920, 1080)
 ///     .sharpen(1.5)
-///     .toFormat(ImageFormat.avif)
-///     .execute();
+///     .encode(const AvifOutput(quality: 85))
+///     .run();
 /// ```
-class ImagePipeline {
-  final Uint8List _inputBytes;
-  final List<Map<String, dynamic>> _operations = [];
-  Uint8List? _watermarkBytes;
-  String _outputFormat = 'jpeg';
-  int _quality = 90;
-  bool _autoOrient = true;
-  bool _preserveMetadata = true;
-  bool _preserveIcc = true;
+final class ImagePipeline {
+  final ImageSource _source;
+  final List<Map<String, dynamic>> _operations;
+  final ImageSource? _watermarkSource;
+  final OutputConfig _output;
+  final bool _autoOrient;
+  final bool _preserveMetadata;
+  final bool _preserveIcc;
+
+  const ImagePipeline._({
+    required ImageSource source,
+    List<Map<String, dynamic>>? operations,
+    ImageSource? watermarkSource,
+    OutputConfig? output,
+    bool? autoOrient,
+    bool? preserveMetadata,
+    bool? preserveIcc,
+  }) : _source = source,
+       _operations = operations ?? const [],
+       _watermarkSource = watermarkSource,
+       _output = output ?? const JpegOutput(),
+       _autoOrient = autoOrient ?? true,
+       _preserveMetadata = preserveMetadata ?? true,
+       _preserveIcc = preserveIcc ?? true;
 
   /// Creates a pipeline from raw image bytes.
-  ImagePipeline(this._inputBytes);
+  factory ImagePipeline.bytes(Uint8List bytes) = _BytesImagePipeline;
+
+  /// Creates a pipeline from a dart:io [File].
+  factory ImagePipeline.file(File file) = _FileImagePipeline;
+
+  /// Creates a pipeline from a cross_file [XFile].
+  factory ImagePipeline.xfile(XFile xfile) = _XFileImagePipeline;
+
+  /// Creates a pipeline from any [ImageSource].
+  factory ImagePipeline.fromSource(ImageSource source) =>
+      ImagePipeline._(source: source);
 
   // ────────────────────────────────
   // Configuration
   // ────────────────────────────────
 
-  /// Sets the output format.
-  ///
-  /// ```dart
-  /// pipeline.toFormat(ImageFormat.webp);
-  /// ```
-  ImagePipeline toFormat(ImageFormat format) {
-    _outputFormat = format.value;
-    return this;
-  }
-
-  /// Compression quality (1–100).
-  ///
-  /// ```dart
-  /// pipeline.quality(85);
-  /// ```
-  ImagePipeline quality(int q) {
-    _quality = q.clamp(1, 100);
-    return this;
-  }
+  /// Sets the output format and quality.
+  ImagePipeline encode(OutputConfig output) => _copyWith(output: output);
 
   /// Enables or disables automatic EXIF orientation.
-  ///
-  /// When enabled (the default), the image is rotated according to its
-  /// EXIF orientation tag before any other operations.
-  ///
-  /// ```dart
-  /// pipeline.autoOrient(false); // keep raw orientation
-  /// ```
-  ImagePipeline autoOrient(bool enabled) {
-    _autoOrient = enabled;
-    return this;
-  }
+  ImagePipeline autoOrient(bool enabled) => _copyWith(autoOrient: enabled);
 
   /// Enables or disables EXIF metadata preservation in the output.
-  ///
-  /// ```dart
-  /// pipeline.preserveMetadata(false); // strip all EXIF data
-  /// ```
-  ImagePipeline preserveMetadata(bool enabled) {
-    _preserveMetadata = enabled;
-    return this;
-  }
+  ImagePipeline preserveMetadata(bool enabled) =>
+      _copyWith(preserveMetadata: enabled);
 
   /// Enables or disables ICC colour profile preservation.
-  ///
-  /// ```dart
-  /// pipeline.preserveIcc(true);
-  /// ```
-  ImagePipeline preserveIcc(bool enabled) {
-    _preserveIcc = enabled;
-    return this;
-  }
+  ImagePipeline preserveIcc(bool enabled) => _copyWith(preserveIcc: enabled);
 
   // ────────────────────────────────
   // Transforms
   // ────────────────────────────────
 
   /// Resizes the image using Lanczos3 interpolation.
-  ///
-  /// ```dart
-  /// pipeline.resize(800, 600);
-  /// ```
-  ImagePipeline resize(int width, int height) {
-    _operations.add({'type': 'resize', 'width': width, 'height': height});
-    return this;
-  }
+  ImagePipeline resize(int width, int height) =>
+      _addOperation({'type': 'resize', 'width': width, 'height': height});
 
-  /// Rectangular crop.
-  ///
-  /// Crops to the region starting at ([x], [y]) with size
-  /// [width]×[height] pixels.
-  ///
-  /// ```dart
-  /// pipeline.crop(100, 50, 640, 480);
-  /// ```
-  ImagePipeline crop(int x, int y, int width, int height) {
-    _operations.add({
-      'type': 'crop',
-      'x': x,
-      'y': y,
-      'width': width,
-      'height': height,
-    });
-    return this;
-  }
+  /// Rectangular crop starting at ([x], [y]) with size [width]×[height].
+  ImagePipeline crop(int x, int y, int width, int height) => _addOperation({
+    'type': 'crop',
+    'x': x,
+    'y': y,
+    'width': width,
+    'height': height,
+  });
 
   /// Free-angle rotation in degrees.
-  ///
-  /// The canvas is expanded to fit the rotated image; empty corners
-  /// are filled with transparency (if the format supports it).
-  ///
-  /// ```dart
-  /// pipeline.rotate(45);
-  /// ```
-  ImagePipeline rotate(double degrees) {
-    _operations.add({'type': 'rotate', 'degrees': degrees});
-    return this;
-  }
+  ImagePipeline rotate(double degrees) =>
+      _addOperation({'type': 'rotate', 'degrees': degrees});
 
-  /// Flips the image horizontally or vertically.
-  ///
-  /// ```dart
-  /// pipeline.flip(FlipDirection.horizontal);
-  /// ```
-  ImagePipeline flip(FlipDirection direction) {
-    _operations.add({
-      'type': direction == FlipDirection.horizontal
-          ? 'flip_horizontal'
-          : 'flip_vertical',
-    });
-    return this;
-  }
+  /// Flips the image horizontally.
+  ImagePipeline flipHorizontal() => _addOperation({'type': 'flip_horizontal'});
+
+  /// Flips the image vertically.
+  ImagePipeline flipVertical() => _addOperation({'type': 'flip_vertical'});
 
   // ────────────────────────────────
   // Effects
   // ────────────────────────────────
 
   /// Gaussian blur with the given [sigma] radius.
-  ///
-  /// ```dart
-  /// pipeline.blur(3.0);
-  /// ```
-  ImagePipeline blur(double sigma) {
-    _operations.add({'type': 'blur', 'sigma': sigma});
-    return this;
-  }
+  ImagePipeline blur(double sigma) =>
+      _addOperation({'type': 'blur', 'sigma': sigma});
 
   /// Sharpens the image using an unsharp mask.
-  ///
-  /// [amount] controls intensity (typically 0.5–3.0), and [threshold]
-  /// sets the minimum brightness difference to sharpen (0.0 = sharpen
-  /// everything).
-  ///
-  /// ```dart
-  /// pipeline.sharpen(1.5);          // default threshold
-  /// pipeline.sharpen(2.0, 0.5);     // with threshold
-  /// ```
-  ImagePipeline sharpen(double amount, [double threshold = 0.0]) {
-    _operations.add({
-      'type': 'sharpen',
-      'amount': amount,
-      'threshold': threshold,
-    });
-    return this;
-  }
+  ImagePipeline sharpen(double amount, [double threshold = 0.0]) =>
+      _addOperation({
+        'type': 'sharpen',
+        'amount': amount,
+        'threshold': threshold,
+      });
 
   /// Sobel edge detection.
-  ///
-  /// Converts the image to a greyscale edge map.
-  ///
-  /// ```dart
-  /// pipeline.sobel();
-  /// ```
-  ImagePipeline sobel() {
-    _operations.add({'type': 'sobel'});
-    return this;
-  }
+  ImagePipeline sobel() => _addOperation({'type': 'sobel'});
 
-  /// Brightness adjustment in the range [−1.0, 1.0].
-  ///
-  /// Positive values brighten, negative values darken.
-  ///
-  /// ```dart
-  /// pipeline.brightness(0.15);   // slightly brighter
-  /// pipeline.brightness(-0.2);   // darker
-  /// ```
-  ImagePipeline brightness(double value) {
-    _operations.add({'type': 'brightness', 'value': value});
-    return this;
-  }
+  /// Brightness adjustment in the range [-1.0, 1.0].
+  ImagePipeline brightness(double value) =>
+      _addOperation({'type': 'brightness', 'value': value});
 
-  /// Contrast adjustment in the range [−1.0, 1.0].
-  ///
-  /// ```dart
-  /// pipeline.contrast(0.3);  // more contrast
-  /// ```
-  ImagePipeline contrast(double value) {
-    _operations.add({'type': 'contrast', 'value': value});
-    return this;
-  }
+  /// Contrast adjustment in the range [-1.0, 1.0].
+  ImagePipeline contrast(double value) =>
+      _addOperation({'type': 'contrast', 'value': value});
 
   /// HSL colour adjustment.
-  ///
-  /// [hue] is a rotation in degrees (0–360), [saturation] and
-  /// [lightness] are offsets in the range [−1.0, 1.0].
-  ///
-  /// ```dart
-  /// pipeline.hsl(hue: 15, saturation: 0.1, lightness: 0.05);
-  /// ```
   ImagePipeline hsl({
     double hue = 0,
     double saturation = 0,
     double lightness = 0,
-  }) {
-    _operations.add({
-      'type': 'hsl',
-      'hue': hue,
-      'saturation': saturation,
-      'lightness': lightness,
-    });
-    return this;
-  }
+  }) => _addOperation({
+    'type': 'hsl',
+    'hue': hue,
+    'saturation': saturation,
+    'lightness': lightness,
+  });
 
   /// Overlays a watermark image.
   ///
-  /// [overlayBytes] are the raw bytes of the watermark image.
-  /// [x] and [y] set the position, [opacity] controls blending
-  /// (0.0 = transparent, 1.0 = fully opaque).
-  ///
-  /// ```dart
-  /// final watermark = File('logo.png').readAsBytesSync();
-  /// pipeline.watermark(watermark, x: 10, y: 10, opacity: 0.6);
-  /// ```
+  /// [source] can be raw bytes, a [File] or an [XFile].
   ImagePipeline watermark(
-    Uint8List overlayBytes, {
+    ImageSource source, {
     int x = 0,
     int y = 0,
     double opacity = 1.0,
-  }) {
-    _watermarkBytes = overlayBytes;
-    _operations.add({'type': 'watermark', 'x': x, 'y': y, 'opacity': opacity});
-    return this;
-  }
+  }) => _copyWith(
+    watermarkSource: source,
+    operations: [
+      ..._operations,
+      {'type': 'watermark', 'x': x, 'y': y, 'opacity': opacity},
+    ],
+  );
 
   /// Applies a named artistic filter.
-  ///
-  /// Available filters: `vintage`, `sepia`, `cool`, `warm`, `marine`,
-  /// `dramatic`, `lomo`, `retro`, `noir`, `bloom`, `polaroid`,
-  /// `golden_hour`, `arctic`, `cinematic`, `fade`.
-  ///
-  /// ```dart
-  /// pipeline.filter('cinematic');
-  /// ```
-  ImagePipeline filter(String name) {
-    _operations.add({'type': 'filter', 'name': name});
-    return this;
-  }
+  ImagePipeline filter(ArtisticFilterName filter) =>
+      _addOperation({'type': 'filter', 'name': filter.jsonName});
 
-  /// Generates a thumbnail that fits inside the given bounding box
-  /// while preserving the aspect ratio.
-  ///
-  /// ```dart
-  /// pipeline.thumbnail(200, 200);
-  /// ```
-  ImagePipeline thumbnail(int maxWidth, int maxHeight) {
-    _operations.add({
-      'type': 'thumbnail',
-      'max_width': maxWidth,
-      'max_height': maxHeight,
-    });
-    return this;
-  }
+  /// Generates a thumbnail that fits inside the given bounding box.
+  ImagePipeline thumbnail(int maxWidth, int maxHeight) => _addOperation({
+    'type': 'thumbnail',
+    'max_width': maxWidth,
+    'max_height': maxHeight,
+  });
 
   // ────────────────────────────────
   // Execution
   // ────────────────────────────────
 
-  /// Builds the JSON configuration for the pipeline.
-  String _buildConfigJson() {
-    final config = {
-      'output_format': _outputFormat,
-      'quality': _quality,
-      'auto_orient': _autoOrient,
-      'preserve_metadata': _preserveMetadata,
-      'preserve_icc': _preserveIcc,
-      'operations': _operations,
-    };
-    return jsonEncode(config);
-  }
-
-  /// Executes the pipeline synchronously (blocks the current thread).
+  /// Executes the pipeline synchronously (blocks the current isolate).
   ///
   /// **Only use in isolates or CLI scripts.** For Flutter / UI code,
-  /// use [execute] instead.
-  ///
-  /// ```dart
-  /// // Inside a Dart CLI script:
-  /// final result = ImagePipeline(bytes)
-  ///     .resize(800, 600)
-  ///     .toFormat(ImageFormat.jpeg)
-  ///     .executeSync();
-  /// ```
-  ImageResult executeSync() {
-    if (_inputBytes.isEmpty) {
-      throw const EmptyInputException();
-    }
-
+  /// use [run] instead.
+  ImageResult runSync() {
     final bridge = NativeBridge();
-    final request = PipelineRequest(
-      inputBytes: _inputBytes,
-      configJson: _buildConfigJson(),
-      watermarkBytes: _watermarkBytes,
-    );
-
-    final response = bridge.processPipeline(request);
-
-    if (response.error != null) {
-      throw _classifyNativeError(response.error!);
-    }
-
-    return ImageResult(
-      data: response.data,
-      width: response.width,
-      height: response.height,
-      format: _outputFormat,
-    );
+    final response = _executeOnBridge(bridge);
+    return _toImageResult(response);
   }
 
   /// Executes the pipeline in a background [Isolate].
   ///
-  /// This is the **recommended** way to run the pipeline. The heavy
-  /// Rust processing runs off the main thread, keeping the UI
-  /// responsive.
-  ///
-  /// ```dart
-  /// final result = await ImagePipeline(bytes)
-  ///     .resize(1920, 1080)
-  ///     .sharpen(1.5)
-  ///     .toFormat(ImageFormat.webp)
-  ///     .quality(85)
-  ///     .execute();
-  ///
-  /// File('output.webp').writeAsBytesSync(result.data);
-  /// ```
-  Future<ImageResult> execute() async {
-    final configJson = _buildConfigJson();
-    final watermark = _watermarkBytes;
-    final input = _inputBytes;
-    final format = _outputFormat;
-
+  /// This is the recommended way to run the pipeline.
+  Future<ImageResult> run() async {
+    final request = await _buildRequest();
     final response = await Isolate.run(() {
       final bridge = NativeBridge();
-      final request = PipelineRequest(
-        inputBytes: input,
-        configJson: configJson,
-        watermarkBytes: watermark,
-      );
       return bridge.processPipeline(request);
     });
+    return _toImageResult(response);
+  }
 
+  // ────────────────────────────────
+  // Internal helpers
+  // ────────────────────────────────
+
+  ImagePipeline _addOperation(Map<String, dynamic> operation) =>
+      _copyWith(operations: [..._operations, operation]);
+
+  ImagePipeline _copyWith({
+    ImageSource? source,
+    List<Map<String, dynamic>>? operations,
+    ImageSource? watermarkSource,
+    OutputConfig? output,
+    bool? autoOrient,
+    bool? preserveMetadata,
+    bool? preserveIcc,
+  }) => ImagePipeline._(
+    source: source ?? _source,
+    operations: operations ?? _operations,
+    watermarkSource: watermarkSource ?? _watermarkSource,
+    output: output ?? _output,
+    autoOrient: autoOrient ?? _autoOrient,
+    preserveMetadata: preserveMetadata ?? _preserveMetadata,
+    preserveIcc: preserveIcc ?? _preserveIcc,
+  );
+
+  String _buildConfigJson() {
+    return jsonEncode({
+      'output_format': _output.format,
+      'quality': _output.quality,
+      'auto_orient': _autoOrient,
+      'preserve_metadata': _preserveMetadata,
+      'preserve_icc': _preserveIcc,
+      'operations': _operations,
+    });
+  }
+
+  Future<PipelineRequest> _buildRequest() async {
+    final bytes = await _source.readBytes();
+    if (bytes.isEmpty) {
+      throw const EmptyInputException();
+    }
+
+    Uint8List? watermarkBytes;
+    final watermarkSource = _watermarkSource;
+    if (watermarkSource != null) {
+      watermarkBytes = await watermarkSource.readBytes();
+      if (watermarkBytes.isEmpty) watermarkBytes = null;
+    }
+
+    return PipelineRequest(
+      inputBytes: bytes,
+      configJson: _buildConfigJson(),
+      watermarkBytes: watermarkBytes,
+    );
+  }
+
+  PipelineResponse _executeOnBridge(NativeBridge bridge) {
+    final request = _buildRequestSync();
+    return bridge.processPipeline(request);
+  }
+
+  PipelineRequest _buildRequestSync() {
+    final bytes = switch (_source) {
+      BytesSource(:final bytes) => bytes,
+      _ => throw UnsupportedError(
+        'Synchronous execution requires an in-memory bytes source. '
+        'Use .run() for File/XFile sources.',
+      ),
+    };
+
+    if (bytes.isEmpty) {
+      throw const EmptyInputException();
+    }
+
+    Uint8List? watermarkBytes;
+    final watermarkSource = _watermarkSource;
+    if (watermarkSource != null) {
+      watermarkBytes = switch (watermarkSource) {
+        BytesSource(:final bytes) => bytes,
+        _ => throw UnsupportedError(
+          'Synchronous execution requires an in-memory bytes watermark.',
+        ),
+      };
+      if (watermarkBytes.isEmpty) watermarkBytes = null;
+    }
+
+    return PipelineRequest(
+      inputBytes: bytes,
+      configJson: _buildConfigJson(),
+      watermarkBytes: watermarkBytes,
+    );
+  }
+
+  ImageResult _toImageResult(PipelineResponse response) {
     if (response.error != null) {
       throw _classifyNativeError(response.error!);
     }
-
     return ImageResult(
       data: response.data,
       width: response.width,
       height: response.height,
-      format: format,
+      format: _output.format,
     );
   }
 }
 
-/// Maps a native error message to the appropriate exception class.
+final class _BytesImagePipeline extends ImagePipeline {
+  _BytesImagePipeline(Uint8List bytes) : super._(source: BytesSource(bytes));
+}
+
+final class _FileImagePipeline extends ImagePipeline {
+  _FileImagePipeline(File file) : super._(source: FileSource(file));
+}
+
+final class _XFileImagePipeline extends ImagePipeline {
+  _XFileImagePipeline(XFile xfile) : super._(source: XFileSource(xfile));
+}
+
 JustImageException _classifyNativeError(String message) {
   final lower = message.toLowerCase();
   if (lower.contains('decode error') ||

@@ -4,14 +4,20 @@ import 'package:just_image/just_image.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('ImageFormat', () {
-    test('enum values have correct string representation', () {
-      expect(ImageFormat.jpeg.value, 'jpeg');
-      expect(ImageFormat.png.value, 'png');
-      expect(ImageFormat.webp.value, 'webp');
-      expect(ImageFormat.avif.value, 'avif');
-      expect(ImageFormat.tiff.value, 'tiff');
-      expect(ImageFormat.bmp.value, 'bmp');
+  group('OutputConfig', () {
+    test('format strings are correct', () {
+      expect(const JpegOutput().format, 'jpeg');
+      expect(const PngOutput().format, 'png');
+      expect(const WebpOutput().format, 'webp');
+      expect(const AvifOutput().format, 'avif');
+      expect(const TiffOutput().format, 'tiff');
+      expect(const BmpOutput().format, 'bmp');
+    });
+
+    test('default qualities are reasonable', () {
+      expect(const JpegOutput().quality, 90);
+      expect(const PngOutput().quality, 100);
+      expect(const WebpOutput().quality, 90);
     });
   });
 
@@ -42,34 +48,32 @@ void main() {
 
   group('ImagePipeline', () {
     test('builds correct config JSON', () {
-      final pipeline = ImagePipeline(Uint8List(10))
+      final pipeline = ImagePipeline.bytes(Uint8List(10))
           .resize(800, 600)
           .sharpen(1.5)
           .brightness(0.1)
-          .toFormat(ImageFormat.webp)
-          .quality(85);
+          .encode(const WebpOutput(quality: 85));
 
-      // Accedemos al JSON indirectamente verificando que no lanza
-      expect(() => pipeline, returnsNormally);
+      expect(pipeline, isA<ImagePipeline>());
     });
 
     test('operations are chainable', () {
       final input = Uint8List(10);
-      final pipeline = ImagePipeline(input)
+      final pipeline = ImagePipeline.bytes(input)
           .resize(1920, 1080)
           .crop(0, 0, 800, 600)
           .rotate(45.0)
-          .flip(FlipDirection.horizontal)
+          .flipHorizontal()
+          .flipVertical()
           .blur(2.0)
           .sharpen(1.0, 0.5)
           .sobel()
           .brightness(0.1)
           .contrast(-0.1)
           .hsl(hue: 30, saturation: 0.2, lightness: -0.1)
-          .filter('vintage')
+          .filter(ArtisticFilterName.vintage)
           .thumbnail(200, 200)
-          .toFormat(ImageFormat.avif)
-          .quality(90)
+          .encode(const AvifOutput(quality: 90))
           .autoOrient(true)
           .preserveMetadata(true)
           .preserveIcc(true);
@@ -77,45 +81,34 @@ void main() {
       expect(pipeline, isA<ImagePipeline>());
     });
 
-    test('filter is chainable', () {
-      final pipeline = ImagePipeline(Uint8List(10)).filter('sepia');
+    test('pipeline is immutable', () {
+      final base = ImagePipeline.bytes(Uint8List(10)).resize(100, 100);
+      final withFilter = base.filter(ArtisticFilterName.sepia);
+      final withThumb = base.thumbnail(50, 50);
+
+      expect(identical(base, withFilter), isFalse);
+      expect(identical(base, withThumb), isFalse);
+      expect(identical(withFilter, withThumb), isFalse);
+    });
+
+    test('filter accepts enum', () {
+      final pipeline = ImagePipeline.bytes(
+        Uint8List(10),
+      ).filter(ArtisticFilterName.sepia);
       expect(pipeline, isA<ImagePipeline>());
     });
 
     test('thumbnail is chainable', () {
-      final pipeline = ImagePipeline(Uint8List(10)).thumbnail(150, 150);
+      final pipeline = ImagePipeline.bytes(Uint8List(10)).thumbnail(150, 150);
       expect(pipeline, isA<ImagePipeline>());
     });
   });
 
-  group('TaskPriority', () {
-    test('ordering is correct', () {
-      expect(
-        TaskPriority.critical.compareTo(TaskPriority.high),
-        greaterThan(0),
-      );
-      expect(TaskPriority.high.compareTo(TaskPriority.normal), greaterThan(0));
-      expect(TaskPriority.normal.compareTo(TaskPriority.low), greaterThan(0));
-    });
-  });
-
-  group('BatchQueue', () {
-    test('can be created with custom concurrency', () {
-      final queue = BatchQueue(concurrency: 8);
-      expect(queue.concurrency, 8);
-      expect(queue.pendingCount, 0);
-      expect(queue.runningCount, 0);
-      queue.dispose();
-    });
-
-    test('throws after dispose', () {
-      final queue = BatchQueue();
-      queue.dispose();
-      expect(queue.isDisposed, isTrue);
-      expect(
-        () => queue.enqueue(ImagePipeline(Uint8List(10))),
-        throwsA(isA<BatchQueueDisposedException>()),
-      );
+  group('ArtisticFilterName', () {
+    test('json names are snake_case', () {
+      expect(ArtisticFilterName.goldenHour.jsonName, 'golden_hour');
+      expect(ArtisticFilterName.cinematic.jsonName, 'cinematic');
+      expect(ArtisticFilterName.vintage.jsonName, 'vintage');
     });
   });
 
@@ -159,18 +152,6 @@ void main() {
       expect(ex.toString(), contains('fuchsia'));
     });
 
-    test('BatchQueueDisposedException has fixed message', () {
-      const ex = BatchQueueDisposedException();
-      expect(ex, isA<JustImageException>());
-      expect(ex.toString(), contains('BatchQueueDisposedException'));
-    });
-
-    test('TaskCancelledException has fixed message', () {
-      const ex = TaskCancelledException();
-      expect(ex, isA<JustImageException>());
-      expect(ex.toString(), contains('TaskCancelledException'));
-    });
-
     test('EmptyInputException has fixed message', () {
       const ex = EmptyInputException();
       expect(ex, isA<JustImageException>());
@@ -184,8 +165,6 @@ void main() {
         const PipelineExecutionException('c'),
         const NativeLibraryException('d'),
         const UnsupportedPlatformException('e'),
-        const BatchQueueDisposedException(),
-        const TaskCancelledException(),
         const EmptyInputException(),
       ];
       for (final ex in exceptions) {

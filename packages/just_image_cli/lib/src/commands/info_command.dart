@@ -31,21 +31,12 @@ class InfoCommand extends Command<void> {
       return;
     }
 
-    final bytes = file.readAsBytesSync();
-    final fileSize = bytes.length;
+    final fileSize = file.lengthSync();
 
     try {
-      final bridge = NativeBridge();
-      final response = bridge.imageInfo(bytes);
-
-      if (response.error != null) {
-        stderr.writeln('Error reading image info: ${response.error}');
-        exitCode = 1;
-        return;
-      }
-
+      final info = await JustImage.info(FileSource(file));
       stdout.writeln('File:       $inputPath');
-      stdout.writeln('Dimensions: ${response.width}x${response.height}');
+      stdout.writeln('Dimensions: ${info.width}x${info.height}');
       stdout.writeln('File size:  ${_humanSize(fileSize)}');
     } on JustImageException catch (e) {
       stderr.writeln('Error: $e');

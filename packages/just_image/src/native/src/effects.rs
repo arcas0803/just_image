@@ -1,57 +1,49 @@
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rayon::prelude::*;
 
-/// Gaussian Blur con sigma dinámico usando kernel separable para rendimiento.
+use crate::pixel_ops::map_rgb;
+
+/// Gaussian blur with the given sigma radius.
 pub fn gaussian_blur(img: &DynamicImage, sigma: f32) -> DynamicImage {
-    // Usamos el blur integrado de la crate image que soporta SIMD
     DynamicImage::ImageRgba8(image::imageops::blur(img, sigma))
 }
 
-/// Unsharp Mask (sharpen): original + amount * (original - blurred)
+/// Unsharp mask sharpen: original + amount * (original - blurred).
 pub fn unsharp_mask(img: &DynamicImage, amount: f32, threshold: f32) -> DynamicImage {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let blurred_rgba = image::imageops::blur(img, 1.0);
 
-    let mut output = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(w, h);
+    let src = rgba.as_raw();
+    let blur = blurred_rgba.as_raw();
+    let mut dst = vec![0u8; src.len()];
+    let row_stride = w as usize * 4;
 
-    // Procesar filas en paralelo con rayon
-    let src_chunks: Vec<&[u8]> = rgba.chunks(w as usize * 4).collect();
-    let blur_chunks: Vec<&[u8]> = blurred_rgba.chunks(w as usize * 4).collect();
-    let mut out_rows: Vec<Vec<u8>> = vec![vec![0u8; w as usize * 4]; h as usize];
-
-    out_rows.par_iter_mut().enumerate().for_each(|(y, row)| {
-        for x in 0..(w as usize) {
-            for c in 0..4usize {
-                let idx = x * 4 + c;
-                let orig = src_chunks[y][idx] as f32;
-                let blur_val = blur_chunks[y][idx] as f32;
-                let diff = (orig - blur_val).abs();
-                if diff > threshold {
-                    let val = orig + amount * (orig - blur_val);
-                    row[idx] = val.clamp(0.0, 255.0) as u8;
-                } else {
-                    row[idx] = src_chunks[y][idx];
+    dst.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let off = y * row_stride;
+            for i in (0..row.len()).step_by(4) {
+                for c in 0..3 {
+                    let orig = src[off + i + c] as f32;
+                    let blur_val = blur[off + i + c] as f32;
+                    let diff = (orig - blur_val).abs();
+                    row[i + c] = if diff > threshold {
+                        (orig + amount * (orig - blur_val)).clamp(0.0, 255.0) as u8
+                    } else {
+                        src[off + i + c]
+                    };
                 }
+                row[i + 3] = src[off + i + 3];
             }
-        }
-    });
+        });
 
-    for (y, row) in out_rows.iter().enumerate() {
-        for x in 0..(w as usize) {
-            let idx = x * 4;
-            output.put_pixel(
-                x as u32,
-                y as u32,
-                Rgba([row[idx], row[idx + 1], row[idx + 2], row[idx + 3]]),
-            );
-        }
-    }
-
-    DynamicImage::ImageRgba8(output)
+    ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(w, h, dst)
+        .map(DynamicImage::ImageRgba8)
+        .expect("buffer size matches image dimensions")
 }
 
-/// Detección de bordes con operador Sobel
+/// Sobel edge detection. Returns a greyscale edge map with alpha=255.
 pub fn sobel_edges(img: &DynamicImage) -> DynamicImage {
     let gray = img.to_luma8();
     let (w, h) = gray.dimensions();
@@ -88,7 +80,6 @@ pub fn sobel_edges(img: &DynamicImage) -> DynamicImage {
         })
         .collect();
 
-    // Fila superior e inferior negra
     for x in 0..w {
         output.put_pixel(x, 0, Rgba([0, 0, 0, 255]));
         output.put_pixel(x, h - 1, Rgba([0, 0, 0, 255]));
@@ -103,96 +94,54 @@ pub fn sobel_edges(img: &DynamicImage) -> DynamicImage {
     DynamicImage::ImageRgba8(output)
 }
 
-/// Ajuste de Brillo: value en rango [-1.0, 1.0]
+/// Brightness adjustment in the range [-1.0, 1.0].
 pub fn adjust_brightness(img: &DynamicImage, value: f32) -> DynamicImage {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
     let offset = (value * 255.0) as i16;
-
-    let src: &[u8] = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
-
-    dst.par_chunks_mut(w as usize * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let src_offset = y * w as usize * 4;
-            for i in (0..row.len()).step_by(4) {
-                row[i] = (src[src_offset + i] as i16 + offset).clamp(0, 255) as u8;
-                row[i + 1] = (src[src_offset + i + 1] as i16 + offset).clamp(0, 255) as u8;
-                row[i + 2] = (src[src_offset + i + 2] as i16 + offset).clamp(0, 255) as u8;
-                row[i + 3] = src[src_offset + i + 3]; // alpha sin cambios
-            }
-        });
-
-    let buf = ImageBuffer::from_raw(w, h, dst).unwrap();
-    DynamicImage::ImageRgba8(buf)
+    map_rgb(img, |[r, g, b]| {
+        [
+            (r as i16 + offset).clamp(0, 255) as u8,
+            (g as i16 + offset).clamp(0, 255) as u8,
+            (b as i16 + offset).clamp(0, 255) as u8,
+        ]
+    })
 }
 
-/// Ajuste de Contraste: value en rango [-1.0, 1.0]
+/// Contrast adjustment in the range [-1.0, 1.0].
 pub fn adjust_contrast(img: &DynamicImage, value: f32) -> DynamicImage {
     let factor = (1.0 + value) * (1.0 + value);
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let src: &[u8] = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
-
-    dst.par_chunks_mut(w as usize * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let src_offset = y * w as usize * 4;
-            for i in (0..row.len()).step_by(4) {
-                for c in 0..3 {
-                    let v = src[src_offset + i + c] as f32 / 255.0;
-                    let adjusted = ((v - 0.5) * factor + 0.5) * 255.0;
-                    row[i + c] = adjusted.clamp(0.0, 255.0) as u8;
-                }
-                row[i + 3] = src[src_offset + i + 3];
-            }
-        });
-
-    let buf = ImageBuffer::from_raw(w, h, dst).unwrap();
-    DynamicImage::ImageRgba8(buf)
+    map_rgb(img, |[r, g, b]| {
+        let adjust = |v: u8| {
+            let v = v as f32 / 255.0;
+            (((v - 0.5) * factor + 0.5) * 255.0).clamp(0.0, 255.0) as u8
+        };
+        [adjust(r), adjust(g), adjust(b)]
+    })
 }
 
-/// Ajuste HSL (Hue rotation en grados, Saturation y Lightness en [-1.0, 1.0])
-pub fn adjust_hsl(img: &DynamicImage, hue: f32, saturation: f32, lightness: f32) -> DynamicImage {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let src: &[u8] = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
-
-    dst.par_chunks_mut(w as usize * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let src_offset = y * w as usize * 4;
-            for i in (0..row.len()).step_by(4) {
-                let r = src[src_offset + i] as f32 / 255.0;
-                let g = src[src_offset + i + 1] as f32 / 255.0;
-                let b = src[src_offset + i + 2] as f32 / 255.0;
-
-                let (h_val, s_val, l_val) = rgb_to_hsl(r, g, b);
-
-                let new_h = (h_val + hue) % 360.0;
-                let new_s = (s_val + saturation).clamp(0.0, 1.0);
-                let new_l = (l_val + lightness).clamp(0.0, 1.0);
-
-                let (nr, ng, nb) = hsl_to_rgb(
-                    if new_h < 0.0 { new_h + 360.0 } else { new_h },
-                    new_s,
-                    new_l,
-                );
-                row[i] = (nr * 255.0).clamp(0.0, 255.0) as u8;
-                row[i + 1] = (ng * 255.0).clamp(0.0, 255.0) as u8;
-                row[i + 2] = (nb * 255.0).clamp(0.0, 255.0) as u8;
-                row[i + 3] = src[src_offset + i + 3];
-            }
-        });
-
-    let buf = ImageBuffer::from_raw(w, h, dst).unwrap();
-    DynamicImage::ImageRgba8(buf)
+/// HSL colour adjustment.
+///
+/// `hue` is a rotation in degrees, `saturation` and `lightness` are offsets
+/// in the range [-1.0, 1.0].
+pub fn adjust_hsl(
+    img: &DynamicImage,
+    hue: f32,
+    saturation: f32,
+    lightness: f32,
+) -> DynamicImage {
+    map_rgb(img, |[r, g, b]| {
+        let (h, s, l) = rgb_to_hsl(r, g, b);
+        let new_h = (h + hue).rem_euclid(360.0);
+        let new_s = (s + saturation).clamp(0.0, 1.0);
+        let new_l = (l + lightness).clamp(0.0, 1.0);
+        hsl_to_rgb(new_h, new_s, new_l)
+    })
 }
 
-fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let l = (max + min) / 2.0;
@@ -223,9 +172,10 @@ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (h * 60.0, s, l)
 }
 
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {
     if s.abs() < f32::EPSILON {
-        return (l, l, l);
+        let v = (l * 255.0).clamp(0.0, 255.0) as u8;
+        return [v, v, v];
     }
 
     let q = if l < 0.5 {
@@ -240,16 +190,15 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     let g = hue_to_rgb(p, q, h_norm);
     let b = hue_to_rgb(p, q, h_norm - 1.0 / 3.0);
 
-    (r, g, b)
+    [
+        (r * 255.0).clamp(0.0, 255.0) as u8,
+        (g * 255.0).clamp(0.0, 255.0) as u8,
+        (b * 255.0).clamp(0.0, 255.0) as u8,
+    ]
 }
 
 fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
-    if t < 0.0 {
-        t += 1.0;
-    }
-    if t > 1.0 {
-        t -= 1.0;
-    }
+    t = t.rem_euclid(1.0);
     if t < 1.0 / 6.0 {
         return p + (q - p) * 6.0 * t;
     }

@@ -62,8 +62,7 @@ class ProcessCommand extends Command<void> {
       return;
     }
 
-    final bytes = inputFile.readAsBytesSync();
-    var pipeline = ImagePipeline(bytes);
+    var pipeline = inputFile.justImage;
 
     // Resize
     final resize = argResults!['resize'] as String?;
@@ -117,11 +116,9 @@ class ProcessCommand extends Command<void> {
     // Flip
     final flip = argResults!['flip'] as String?;
     if (flip != null) {
-      pipeline = pipeline.flip(
-        flip == 'horizontal'
-            ? FlipDirection.horizontal
-            : FlipDirection.vertical,
-      );
+      pipeline = flip == 'horizontal'
+          ? pipeline.flipHorizontal()
+          : pipeline.flipVertical();
     }
 
     // Effects
@@ -169,45 +166,16 @@ class ProcessCommand extends Command<void> {
       pipeline = pipeline.contrast(val);
     }
 
-    // Format & quality
-    final format = argResults!['format'] as String?;
-    if (format != null) {
-      pipeline = pipeline.toFormat(
-        ImageFormat.values.firstWhere((f) => f.value == format),
-      );
-    }
-
-    final quality = int.tryParse(argResults!['quality'] as String);
-    if (quality != null) {
-      pipeline = pipeline.quality(quality);
-    }
-
-    // Watermark
-    final watermarkPath = argResults!['watermark'] as String?;
-    if (watermarkPath != null) {
-      final wmFile = File(watermarkPath);
-      if (!wmFile.existsSync()) {
-        stderr.writeln('Error: Watermark file not found: $watermarkPath');
-        exitCode = 1;
-        return;
-      }
-      final wmBytes = wmFile.readAsBytesSync();
-      final wmX = int.tryParse(argResults!['watermark-x'] as String) ?? 0;
-      final wmY = int.tryParse(argResults!['watermark-y'] as String) ?? 0;
-      final wmOpacity =
-          double.tryParse(argResults!['watermark-opacity'] as String) ?? 1.0;
-      pipeline = pipeline.watermark(
-        wmBytes,
-        x: wmX,
-        y: wmY,
-        opacity: wmOpacity,
-      );
-    }
-
     // Filter
     final filterName = argResults!['filter'] as String?;
     if (filterName != null) {
-      pipeline = pipeline.filter(filterName);
+      final filter = _parseFilter(filterName);
+      if (filter == null) {
+        stderr.writeln('Error: Unknown filter: $filterName');
+        exitCode = 1;
+        return;
+      }
+      pipeline = pipeline.filter(filter);
     }
 
     // Thumbnail
@@ -229,9 +197,36 @@ class ProcessCommand extends Command<void> {
       pipeline = pipeline.thumbnail(w, h);
     }
 
+    // Watermark
+    final watermarkPath = argResults!['watermark'] as String?;
+    if (watermarkPath != null) {
+      final wmFile = File(watermarkPath);
+      if (!wmFile.existsSync()) {
+        stderr.writeln('Error: Watermark file not found: $watermarkPath');
+        exitCode = 1;
+        return;
+      }
+      final wmX = int.tryParse(argResults!['watermark-x'] as String) ?? 0;
+      final wmY = int.tryParse(argResults!['watermark-y'] as String) ?? 0;
+      final wmOpacity =
+          double.tryParse(argResults!['watermark-opacity'] as String) ?? 1.0;
+      pipeline = pipeline.watermark(
+        FileSource(wmFile),
+        x: wmX,
+        y: wmY,
+        opacity: wmOpacity,
+      );
+    }
+
+    // Format & quality
+    final format = argResults!['format'] as String?;
+    final quality = int.tryParse(argResults!['quality'] as String) ?? 90;
+    final output = _buildOutput(format: format, quality: quality);
+    pipeline = pipeline.encode(output);
+
     // Execute
     try {
-      final result = await pipeline.execute();
+      final result = await pipeline.run();
       File(outputPath).writeAsBytesSync(result.data);
       stdout.writeln(
         'Done: ${result.width}x${result.height} ${result.format} '
@@ -241,5 +236,26 @@ class ProcessCommand extends Command<void> {
       stderr.writeln('Error: $e');
       exitCode = 1;
     }
+  }
+
+  OutputConfig _buildOutput({String? format, required int quality}) {
+    return switch (format) {
+      'png' => PngOutput(quality: quality),
+      'webp' => WebpOutput(quality: quality),
+      'avif' => AvifOutput(quality: quality),
+      'tiff' => TiffOutput(quality: quality),
+      'bmp' => BmpOutput(quality: quality),
+      _ => JpegOutput(quality: quality),
+    };
+  }
+
+  ArtisticFilterName? _parseFilter(String name) {
+    final lower = name.toLowerCase();
+    for (final filter in ArtisticFilterName.values) {
+      if (filter.jsonName == lower || filter.name == lower) {
+        return filter;
+      }
+    }
+    return null;
   }
 }

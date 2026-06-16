@@ -1,5 +1,18 @@
 # just_image_flutter
 
+> **DISCONTINUED**: This package is no longer maintained. The [`just_image`](https://pub.dev/packages/just_image) core package now works directly in Flutter apps via Native Assets, so a separate Flutter wrapper plugin is unnecessary.
+>
+> To migrate, replace your dependency:
+>
+> ```yaml
+> dependencies:
+>   just_image: ^1.0.3
+> ```
+>
+> And update your imports from `package:just_image_flutter/just_image_flutter.dart` to `package:just_image/just_image.dart`.
+>
+> This package will be marked as **discontinued** on pub.dev in its next publish.
+
 Zero-config Flutter plugin for [`just_image`](https://pub.dev/packages/just_image) —
 bridges the Rust-powered image processing engine to Flutter apps via
 [Native Assets](https://dart.dev/interop/c-interop#native-assets).

@@ -1,8 +1,12 @@
 # just_image
 
-High-performance image processing engine for Dart, powered by a Rust FFI backend.
+High-performance image processing engine for Dart and Flutter, powered by a Rust FFI backend.
 
 **Zero-copy memory** · **SIMD acceleration** · **Professional metadata preservation**
+
+> This single package now powers both Dart CLI/servers **and** Flutter apps. The former
+> wrapper packages `just_image_cli` and `just_image_flutter` are discontinued; depend on
+> `just_image` directly instead.
 
 ## Features
 
@@ -21,7 +25,7 @@ High-performance image processing engine for Dart, powered by a Rust FFI backend
 
 ## Prerequisites
 
-- **Dart SDK** >= 3.10.8
+- **Dart SDK** >= 3.10.8 (Flutter >= 3.22.0)
 - **Rust toolchain** ([rustup.rs](https://rustup.rs/))
 - Native Assets experiment: `--enable-experiment=native-assets`
 
@@ -29,14 +33,36 @@ High-performance image processing engine for Dart, powered by a Rust FFI backend
 
 ```yaml
 dependencies:
-  just_image: ^1.0.0
+  just_image: ^1.0.3
 ```
 
-> For Flutter apps use [`just_image_flutter`](https://pub.dev/packages/just_image_flutter) instead.
+The same dependency works for **Dart CLI/servers**, **Flutter apps**, and any other Dart
+runtime that supports Native Assets. The Rust library is compiled automatically by the
+`hook/build.dart` hook; no platform-specific setup is required.
 
 ## Usage
 
-### Basic pipeline
+### Flutter apps
+
+Import `just_image` directly — no wrapper plugin is needed:
+
+```dart
+import 'package:just_image/just_image.dart';
+
+final result = await ImagePipeline(imageBytes)
+    .resize(800, 600)
+    .encode(const WebpOutput(quality: 85))
+    .run();
+```
+
+Build as usual with Native Assets enabled:
+
+```bash
+flutter run --enable-experiment=native-assets
+flutter build apk --enable-experiment=native-assets
+```
+
+### Dart apps / CLI / servers
 
 ```dart
 import 'package:just_image/just_image.dart';
@@ -45,11 +71,16 @@ final result = await ImagePipeline(imageBytes)
     .resize(1920, 1080)
     .sharpen(1.5)
     .brightness(0.1)
-    .toFormat(ImageFormat.avif)
-    .quality(85)
-    .execute();
+    .encode(const AvifOutput(quality: 85))
+    .run();
 
 File('output.avif').writeAsBytesSync(result.data);
+```
+
+Run with:
+
+```bash
+dart --enable-experiment=native-assets run bin/main.dart
 ```
 
 ### Artistic filters
@@ -57,16 +88,14 @@ File('output.avif').writeAsBytesSync(result.data);
 ```dart
 // Apply a single filter
 final result = await ImagePipeline(bytes)
-    .filter('cinematic')
-    .toFormat(ImageFormat.jpeg)
-    .quality(90)
-    .execute();
+    .filter(ArtisticFilterName.cinematic)
+    .encode(const JpegOutput(quality: 90))
+    .run();
 
 // List all available filters
-final engine = JustImageEngine();
-print(engine.availableFilters);
-// [vintage, sepia, cool, warm, marine, dramatic, lomo, retro,
-//  noir, bloom, polaroid, golden_hour, arctic, cinematic, fade]
+print(ArtisticFilterName.values.map((f) => f.jsonName));
+// (vintage, sepia, cool, warm, marine, dramatic, lomo, retro,
+//  noir, bloom, polaroid, golden_hour, arctic, cinematic, fade)
 ```
 
 ### Thumbnail generation
@@ -74,22 +103,20 @@ print(engine.availableFilters);
 ```dart
 final thumb = await ImagePipeline(bytes)
     .thumbnail(200, 200)
-    .toFormat(ImageFormat.webp)
-    .execute();
+    .encode(const WebpOutput(quality: 85))
+    .run();
 // Aspect ratio is preserved — fits inside the 200×200 box
 ```
 
 ### BlurHash
 
 ```dart
-final engine = JustImageEngine();
-
 // Encode: image → compact hash string
-final hash = await engine.blurHashEncode(imageBytes);
+final hash = await JustImage.blurHashEncode(BytesSource(imageBytes));
 print(hash); // e.g. "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
 
 // Decode: hash string → placeholder PNG
-final placeholder = await engine.blurHashDecode(
+final placeholder = await JustImage.blurHashDecode(
   hash,
   width: 32,
   height: 32,
@@ -103,31 +130,25 @@ File('placeholder.png').writeAsBytesSync(placeholder.data);
 final result = await ImagePipeline(bytes)
     .crop(100, 100, 800, 600)
     .rotate(90)
-    .flip(FlipDirection.horizontal)
+    .flipHorizontal()
     .blur(2.0)
     .contrast(0.2)
     .hsl(hue: 10, saturation: 0.1, lightness: 0.0)
-    .watermark(overlayBytes, x: 50, y: 50, opacity: 0.7)
-    .toFormat(ImageFormat.webp)
-    .execute();
+    .watermark(BytesSource(overlayBytes), x: 50, y: 50, opacity: 0.7)
+    .encode(const WebpOutput(quality: 85))
+    .run();
 ```
 
 ### Batch processing
 
 ```dart
-final engine = JustImageEngine();
-
-final batch = engine.createBatch(concurrency: 4);
-
-final futures = files.map((f) {
-  final pipeline = ImagePipeline(f.readAsBytesSync())
+final pipelines = files.map((f) {
+  return ImagePipeline.file(f)
       .resize(800, 600)
-      .toFormat(ImageFormat.jpeg);
-  return batch.enqueue(pipeline, priority: TaskPriority.normal);
-});
+      .encode(const JpegOutput());
+}).toList();
 
-final results = await Future.wait(futures);
-batch.dispose();
+final results = await JustImage.processBatch(pipelines, concurrency: 4);
 ```
 
 ## API reference
@@ -136,24 +157,23 @@ batch.dispose();
 
 | Category | Methods |
 |---|---|
-| **Transform** | `resize(w, h)`, `crop(x, y, w, h)`, `rotate(degrees)`, `flip(direction)`, `thumbnail(maxW, maxH)` |
+| **Transform** | `resize(w, h)`, `crop(x, y, w, h)`, `rotate(degrees)`, `flipHorizontal()`, `flipVertical()`, `thumbnail(maxW, maxH)` |
 | **Effects** | `blur(sigma)`, `sharpen(amount, [threshold])`, `sobel()`, `brightness(v)`, `contrast(v)`, `hsl(hue, sat, light)` |
-| **Filters** | `filter(name)` — 15 built-in artistic filters |
-| **Watermark** | `watermark(bytes, x:, y:, opacity:)` |
-| **Output** | `toFormat(format)`, `quality(1-100)` |
+| **Filters** | `filter(ArtisticFilterName)` — 15 built-in artistic filters |
+| **Watermark** | `watermark(source, x:, y:, opacity:)` |
+| **Output** | `encode(OutputConfig)` |
 | **Config** | `autoOrient(bool)`, `preserveMetadata(bool)`, `preserveIcc(bool)` |
-| **Execution** | `execute()` (async, recommended), `executeSync()` (for isolates/CLI) |
+| **Execution** | `run()` (async, recommended), `runSync()` (for isolates/CLI) |
 
-### JustImageEngine
+### JustImage
 
 | Method | Description |
 |---|---|
-| `load(bytes)` | Create a pipeline from image bytes |
-| `createBatch(concurrency:)` | Create a parallel batch queue |
-| `availableFilters` | List of 15 built-in filter names |
-| `blurHashEncode(bytes, {componentsX, componentsY})` | Encode image to BlurHash string |
+| `process(source, {width, height, output})` | One-shot resize + encode |
+| `processBatch(pipelines, {concurrency})` | Process pipelines in parallel |
+| `blurHashEncode(source, {componentsX, componentsY})` | Encode image to BlurHash string |
 | `blurHashDecode(hash, {width, height})` | Decode BlurHash to placeholder image |
-| `dispose()` | Release resources |
+| `info(source)` | Read image width/height metadata |
 
 ### Exception hierarchy
 

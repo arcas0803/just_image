@@ -45,11 +45,9 @@ class _EncodeSubcommand extends Command<void> {
     final cx = int.tryParse(argResults!['components-x'] as String) ?? 4;
     final cy = int.tryParse(argResults!['components-y'] as String) ?? 3;
 
-    final engine = JustImageEngine();
     try {
-      final bytes = inputFile.readAsBytesSync();
-      final hash = await engine.blurHashEncode(
-        bytes,
+      final hash = await JustImage.blurHashEncode(
+        FileSource(inputFile),
         componentsX: cx,
         componentsY: cy,
       );
@@ -57,8 +55,6 @@ class _EncodeSubcommand extends Command<void> {
     } on JustImageException catch (e) {
       stderr.writeln('Error: $e');
       exitCode = 1;
-    } finally {
-      engine.dispose();
     }
   }
 }
@@ -90,9 +86,8 @@ class _DecodeSubcommand extends Command<void> {
     final width = int.tryParse(argResults!['width'] as String) ?? 32;
     final height = int.tryParse(argResults!['height'] as String) ?? 32;
 
-    final engine = JustImageEngine();
     try {
-      final result = await engine.blurHashDecode(
+      final result = await JustImage.blurHashDecode(
         hash,
         width: width,
         height: height,
@@ -104,8 +99,6 @@ class _DecodeSubcommand extends Command<void> {
     } on JustImageException catch (e) {
       stderr.writeln('Error: $e');
       exitCode = 1;
-    } finally {
-      engine.dispose();
     }
   }
 }

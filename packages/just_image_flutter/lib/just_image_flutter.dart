@@ -1,24 +1,16 @@
 /// Zero-config Flutter plugin for just_image.
 ///
-/// This package is a pure FFI bridge: it declares `ffiPlugin: true` for
-/// every platform so that Flutter's build system invokes the Native Assets
-/// hook in the core `just_image` package. The Rust engine is compiled and
-/// bundled into the app binary automatically.
+/// **DISCONTINUED**: This package is no longer maintained. The `just_image`
+/// core package now works directly in Flutter apps via Native Assets. Depend on
+/// `package:just_image` and import `package:just_image/just_image.dart` instead.
 ///
-/// Import this single package to access the full processing API:
-///
-/// ```dart
-/// import 'package:just_image_flutter/just_image_flutter.dart';
-///
-/// final result = await ImagePipeline(bytes)
-///     .resize(800, 600)
-///     .toFormat(ImageFormat.webp)
-///     .quality(85)
-///     .execute();
-/// ```
-///
-/// No additional platform configuration, build scripts, or native code required.
-/// Just have the Rust toolchain installed on the development machine.
+/// This package was a pure FFI bridge: it declared `ffiPlugin: true` for every
+/// platform so that Flutter's build system invoked the Native Assets hook in
+/// the core `just_image` package. That behavior is now built into `just_image`
+/// itself.
 library;
 
+@Deprecated(
+  'Use package:just_image directly. just_image_flutter is discontinued.',
+)
 export 'package:just_image/just_image.dart';

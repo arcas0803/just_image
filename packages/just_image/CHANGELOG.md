@@ -1,3 +1,16 @@
+## 1.0.4
+
+- Migrated Native Assets build hook to `package:hooks` + `package:code_assets`.
+- Fixed iOS simulator compilation: correct `aarch64-apple-ios-sim` / `x86_64-apple-ios-sim` target triple selection.
+- iOS architecture now respects `targetArchitecture` instead of defaulting to `arm64`.
+- Linker wrapper now uses the compiler driver (`clang`) so Apple SDK flags are parsed correctly.
+
+## 1.0.3
+
+- Core package is now the single entry point for both Dart and Flutter apps.
+- Documented direct Flutter usage; no wrapper plugin is required anymore.
+- `just_image_cli` and `just_image_flutter` are discontinued — depend on `just_image` directly.
+
 ## 1.0.2
 
 - Android: auto-install missing Rust targets via `rustup target add` during build.

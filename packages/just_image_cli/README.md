@@ -1,5 +1,16 @@
 # just_image_cli
 
+> **DISCONTINUED**: This package is no longer maintained. The [`just_image`](https://pub.dev/packages/just_image) core package now works directly in any Dart environment (CLI, servers, Flutter, etc.) via Native Assets, so a separate CLI wrapper is unnecessary.
+>
+> To build a command-line tool, depend on `just_image` directly:
+>
+> ```yaml
+> dependencies:
+>   just_image: ^1.0.3
+> ```
+>
+> This package will be marked as **discontinued** on pub.dev in its next publish.
+
 Command-line tool for high-performance image processing, powered by [`just_image`](https://pub.dev/packages/just_image).
 
 Resize, convert, crop, rotate, apply artistic filters, generate thumbnails, and work with BlurHash — all from the terminal.

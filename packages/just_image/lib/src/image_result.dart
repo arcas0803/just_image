@@ -3,7 +3,7 @@ import 'dart:typed_data';
 /// Immutable result of an image processing operation.
 ///
 /// ```dart
-/// final result = await pipeline.execute();
+/// final result = await pipeline.run();
 /// print('${result.width}x${result.height}, ${result.sizeInBytes} bytes');
 /// File('output.jpg').writeAsBytesSync(result.data);
 /// ```

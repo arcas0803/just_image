@@ -11,8 +11,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  just_image_flutter:
-    path: ..
+  just_image:
+    path: ../../just_image
   image_picker: ^1.1.2
   share_plus: ^10.1.4
   file_selector: ^1.0.2

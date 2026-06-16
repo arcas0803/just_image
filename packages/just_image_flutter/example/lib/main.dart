@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:just_image_flutter/just_image_flutter.dart';
+import 'package:image_picker/image_picker.dart' as picker;
+import 'package:just_image/just_image.dart';
 import 'package:share_plus/share_plus.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -48,19 +48,16 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late final TabController _tabController;
-  late final JustImageEngine _engine;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _engine = JustImageEngine();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _engine.dispose();
     super.dispose();
   }
 
@@ -81,12 +78,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          SingleTab(engine: _engine),
-          FiltersTab(engine: _engine),
-          BlurHashTab(engine: _engine),
-          BatchTab(engine: _engine),
-        ],
+        children: const [SingleTab(), FiltersTab(), BlurHashTab(), BatchTab()],
       ),
     );
   }
@@ -102,14 +94,16 @@ String _fmtBytes(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
 }
 
-Future<Uint8List?> _pickImage(ImagePicker picker) async {
-  final file = await picker.pickImage(source: ImageSource.gallery);
+Future<Uint8List?> _pickImage(picker.ImagePicker imagePicker) async {
+  final file = await imagePicker.pickImage(source: picker.ImageSource.gallery);
   if (file == null) return null;
   return file.readAsBytes();
 }
 
-Future<List<Uint8List>> _pickMultipleImages(ImagePicker picker) async {
-  final files = await picker.pickMultiImage();
+Future<List<Uint8List>> _pickMultipleImages(
+  picker.ImagePicker imagePicker,
+) async {
+  final files = await imagePicker.pickMultiImage();
   final results = <Uint8List>[];
   for (final f in files) {
     results.add(await f.readAsBytes());
@@ -126,6 +120,27 @@ Future<void> _shareBytes(Uint8List data, String format) async {
     ),
   ]);
 }
+
+const _outputOptions = <OutputConfig>[
+  JpegOutput(),
+  PngOutput(),
+  WebpOutput(),
+  AvifOutput(),
+  TiffOutput(),
+  BmpOutput(),
+];
+
+OutputConfig _outputWithQuality(OutputConfig config, int quality) =>
+    switch (config) {
+      JpegOutput() => JpegOutput(quality: quality),
+      PngOutput() => PngOutput(quality: quality),
+      WebpOutput() => WebpOutput(quality: quality),
+      AvifOutput() => AvifOutput(quality: quality),
+      TiffOutput() => TiffOutput(quality: quality),
+      BmpOutput() => BmpOutput(quality: quality),
+    };
+
+enum _FlipMode { none, horizontal, vertical }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared Widgets
@@ -251,8 +266,7 @@ class _SliderRow extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class SingleTab extends StatefulWidget {
-  final JustImageEngine engine;
-  const SingleTab({super.key, required this.engine});
+  const SingleTab({super.key});
 
   @override
   State<SingleTab> createState() => _SingleTabState();
@@ -260,7 +274,7 @@ class SingleTab extends StatefulWidget {
 
 class _SingleTabState extends State<SingleTab>
     with AutomaticKeepAliveClientMixin {
-  final _picker = ImagePicker();
+  final _picker = picker.ImagePicker();
 
   Uint8List? _inputBytes;
   ImageResult? _result;
@@ -269,19 +283,19 @@ class _SingleTabState extends State<SingleTab>
   String? _error;
 
   // Settings
-  ImageFormat _format = ImageFormat.jpeg;
+  OutputConfig _outputConfig = const JpegOutput();
   double _quality = 90;
   bool _doResize = false;
   double _resizeW = 1920;
   double _resizeH = 1080;
   double _rotateDeg = 0;
-  FlipDirection? _flipDir;
+  _FlipMode _flip = _FlipMode.none;
   double _blur = 0;
   double _sharpen = 0;
   double _brightness = 0;
   double _contrast = 0;
   bool _sobel = false;
-  String? _filterName;
+  ArtisticFilterName? _filter;
   bool _doThumbnail = false;
   double _thumbW = 300;
   double _thumbH = 300;
@@ -314,10 +328,8 @@ class _SingleTabState extends State<SingleTab>
     try {
       final sw = Stopwatch()..start();
 
-      var pipeline = widget.engine
-          .load(_inputBytes!)
-          .toFormat(_format)
-          .quality(_quality.round())
+      var pipeline = _inputBytes!.justImage
+          .encode(_outputWithQuality(_outputConfig, _quality.round()))
           .autoOrient(_autoOrient)
           .preserveMetadata(_preserveMetadata)
           .preserveIcc(_preserveIcc);
@@ -328,8 +340,13 @@ class _SingleTabState extends State<SingleTab>
       if (_rotateDeg != 0) {
         pipeline = pipeline.rotate(_rotateDeg);
       }
-      if (_flipDir != null) {
-        pipeline = pipeline.flip(_flipDir!);
+      switch (_flip) {
+        case _FlipMode.horizontal:
+          pipeline = pipeline.flipHorizontal();
+        case _FlipMode.vertical:
+          pipeline = pipeline.flipVertical();
+        case _FlipMode.none:
+          break;
       }
       if (_blur > 0) {
         pipeline = pipeline.blur(_blur);
@@ -346,14 +363,14 @@ class _SingleTabState extends State<SingleTab>
       if (_sobel) {
         pipeline = pipeline.sobel();
       }
-      if (_filterName != null) {
-        pipeline = pipeline.filter(_filterName!);
+      if (_filter != null) {
+        pipeline = pipeline.filter(_filter!);
       }
       if (_doThumbnail) {
         pipeline = pipeline.thumbnail(_thumbW.round(), _thumbH.round());
       }
 
-      final result = await pipeline.execute();
+      final result = await pipeline.run();
       sw.stop();
 
       setState(() {
@@ -370,7 +387,7 @@ class _SingleTabState extends State<SingleTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final filters = widget.engine.availableFilters;
+    final filters = ArtisticFilterName.values;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -400,21 +417,23 @@ class _SingleTabState extends State<SingleTab>
           const SizedBox(height: 8),
 
           // Format
-          DropdownButtonFormField<ImageFormat>(
-            initialValue: _format,
+          DropdownButtonFormField<OutputConfig>(
+            initialValue: _outputConfig,
             decoration: const InputDecoration(
               labelText: 'Format',
               border: OutlineInputBorder(),
             ),
-            items: ImageFormat.values
+            items: _outputOptions
                 .map(
-                  (f) => DropdownMenuItem(
-                    value: f,
-                    child: Text(f.value.toUpperCase()),
+                  (o) => DropdownMenuItem(
+                    value: o.format == _outputConfig.format ? _outputConfig : o,
+                    child: Text(o.format.toUpperCase()),
                   ),
                 )
                 .toList(),
-            onChanged: (v) => setState(() => _format = v!),
+            onChanged: (v) => setState(
+              () => _outputConfig = _outputWithQuality(v!, _quality.round()),
+            ),
           ),
           const SizedBox(height: 8),
 
@@ -429,7 +448,13 @@ class _SingleTabState extends State<SingleTab>
                   max: 100,
                   divisions: 99,
                   label: _quality.round().toString(),
-                  onChanged: (v) => setState(() => _quality = v),
+                  onChanged: (v) => setState(() {
+                    _quality = v;
+                    _outputConfig = _outputWithQuality(
+                      _outputConfig,
+                      v.round(),
+                    );
+                  }),
                 ),
               ),
               SizedBox(width: 40, child: Text('${_quality.round()}')),
@@ -501,22 +526,20 @@ class _SingleTabState extends State<SingleTab>
               const Text('Flip: '),
               ChoiceChip(
                 label: const Text('None'),
-                selected: _flipDir == null,
-                onSelected: (_) => setState(() => _flipDir = null),
+                selected: _flip == _FlipMode.none,
+                onSelected: (_) => setState(() => _flip = _FlipMode.none),
               ),
               const SizedBox(width: 4),
               ChoiceChip(
                 label: const Text('H'),
-                selected: _flipDir == FlipDirection.horizontal,
-                onSelected: (_) =>
-                    setState(() => _flipDir = FlipDirection.horizontal),
+                selected: _flip == _FlipMode.horizontal,
+                onSelected: (_) => setState(() => _flip = _FlipMode.horizontal),
               ),
               const SizedBox(width: 4),
               ChoiceChip(
                 label: const Text('V'),
-                selected: _flipDir == FlipDirection.vertical,
-                onSelected: (_) =>
-                    setState(() => _flipDir = FlipDirection.vertical),
+                selected: _flip == _FlipMode.vertical,
+                onSelected: (_) => setState(() => _flip = _FlipMode.vertical),
               ),
             ],
           ),
@@ -566,17 +589,19 @@ class _SingleTabState extends State<SingleTab>
           ),
 
           // Filter
-          DropdownButtonFormField<String?>(
-            initialValue: _filterName,
+          DropdownButtonFormField<ArtisticFilterName?>(
+            initialValue: _filter,
             decoration: const InputDecoration(
               labelText: 'Artistic Filter',
               border: OutlineInputBorder(),
             ),
             items: [
               const DropdownMenuItem(value: null, child: Text('None')),
-              ...filters.map((f) => DropdownMenuItem(value: f, child: Text(f))),
+              ...filters.map(
+                (f) => DropdownMenuItem(value: f, child: Text(f.jsonName)),
+              ),
             ],
-            onChanged: (v) => setState(() => _filterName = v),
+            onChanged: (v) => setState(() => _filter = v),
           ),
           const SizedBox(height: 8),
 
@@ -693,8 +718,7 @@ class _SingleTabState extends State<SingleTab>
 // ═══════════════════════════════════════════════════════════════════════════
 
 class FiltersTab extends StatefulWidget {
-  final JustImageEngine engine;
-  const FiltersTab({super.key, required this.engine});
+  const FiltersTab({super.key});
 
   @override
   State<FiltersTab> createState() => _FiltersTabState();
@@ -702,14 +726,14 @@ class FiltersTab extends StatefulWidget {
 
 class _FiltersTabState extends State<FiltersTab>
     with AutomaticKeepAliveClientMixin {
-  final _picker = ImagePicker();
+  final _picker = picker.ImagePicker();
 
   Uint8List? _inputBytes;
   bool _generating = false;
   String? _error;
 
   // filter name -> (result, elapsed)
-  final Map<String, (ImageResult, Duration)> _previews = {};
+  final Map<ArtisticFilterName, (ImageResult, Duration)> _previews = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -733,24 +757,22 @@ class _FiltersTabState extends State<FiltersTab>
       _error = null;
     });
 
-    final filters = widget.engine.availableFilters;
+    final filters = ArtisticFilterName.values;
     try {
-      final futures = filters.map((name) async {
+      final futures = filters.map((filter) async {
         final sw = Stopwatch()..start();
-        final result = await widget.engine
-            .load(_inputBytes!)
+        final result = await _inputBytes!.justImage
             .thumbnail(300, 300)
-            .filter(name)
-            .toFormat(ImageFormat.jpeg)
-            .quality(80)
-            .execute();
+            .filter(filter)
+            .encode(const JpegOutput(quality: 80))
+            .run();
         sw.stop();
-        return (name, result, sw.elapsed);
+        return (filter, result, sw.elapsed);
       });
 
       final results = await Future.wait(futures);
-      for (final (name, result, elapsed) in results) {
-        _previews[name] = (result, elapsed);
+      for (final (filter, result, elapsed) in results) {
+        _previews[filter] = (result, elapsed);
       }
     } catch (e) {
       _error = e.toString();
@@ -759,7 +781,7 @@ class _FiltersTabState extends State<FiltersTab>
     }
   }
 
-  Future<void> _applyFullSize(String filterName) async {
+  Future<void> _applyFullSize(ArtisticFilterName filter) async {
     if (_inputBytes == null) return;
 
     showDialog(
@@ -770,12 +792,10 @@ class _FiltersTabState extends State<FiltersTab>
 
     try {
       final sw = Stopwatch()..start();
-      final result = await widget.engine
-          .load(_inputBytes!)
-          .filter(filterName)
-          .toFormat(ImageFormat.jpeg)
-          .quality(90)
-          .execute();
+      final result = await _inputBytes!.justImage
+          .filter(filter)
+          .encode(const JpegOutput(quality: 90))
+          .run();
       sw.stop();
 
       if (!mounted) return;
@@ -792,7 +812,7 @@ class _FiltersTabState extends State<FiltersTab>
             padding: const EdgeInsets.all(16),
             children: [
               Text(
-                filterName.toUpperCase(),
+                filter.jsonName.toUpperCase(),
                 style: Theme.of(ctx).textTheme.titleLarge,
               ),
               const SizedBox(height: 8),
@@ -839,7 +859,7 @@ class _FiltersTabState extends State<FiltersTab>
           const SizedBox(height: 16),
           const Center(child: CircularProgressIndicator()),
           const SizedBox(height: 8),
-          const Center(child: Text('Generating 15 filter previews...')),
+          const Center(child: Text('Generating filter previews...')),
         ],
 
         if (_error != null) ...[
@@ -872,10 +892,10 @@ class _FiltersTabState extends State<FiltersTab>
             itemCount: _previews.length,
             itemBuilder: (context, index) {
               final entry = _previews.entries.elementAt(index);
-              final name = entry.key;
+              final filter = entry.key;
               final (result, elapsed) = entry.value;
               return GestureDetector(
-                onTap: () => _applyFullSize(name),
+                onTap: () => _applyFullSize(filter),
                 child: Card(
                   clipBehavior: Clip.antiAlias,
                   child: Column(
@@ -889,7 +909,7 @@ class _FiltersTabState extends State<FiltersTab>
                         child: Column(
                           children: [
                             Text(
-                              name,
+                              filter.jsonName,
                               style: Theme.of(context).textTheme.labelSmall,
                               textAlign: TextAlign.center,
                               maxLines: 1,
@@ -924,8 +944,7 @@ class _FiltersTabState extends State<FiltersTab>
 // ═══════════════════════════════════════════════════════════════════════════
 
 class BlurHashTab extends StatefulWidget {
-  final JustImageEngine engine;
-  const BlurHashTab({super.key, required this.engine});
+  const BlurHashTab({super.key});
 
   @override
   State<BlurHashTab> createState() => _BlurHashTabState();
@@ -933,7 +952,7 @@ class BlurHashTab extends StatefulWidget {
 
 class _BlurHashTabState extends State<BlurHashTab>
     with AutomaticKeepAliveClientMixin {
-  final _picker = ImagePicker();
+  final _picker = picker.ImagePicker();
   final _hashController = TextEditingController();
 
   Uint8List? _inputBytes;
@@ -977,8 +996,8 @@ class _BlurHashTabState extends State<BlurHashTab>
     });
 
     try {
-      final hash = await widget.engine.blurHashEncode(
-        _inputBytes!,
+      final hash = await JustImage.blurHashEncode(
+        BytesSource(_inputBytes!),
         componentsX: _componentsX.round(),
         componentsY: _componentsY.round(),
       );
@@ -1002,7 +1021,7 @@ class _BlurHashTabState extends State<BlurHashTab>
     });
 
     try {
-      final result = await widget.engine.blurHashDecode(
+      final result = await JustImage.blurHashDecode(
         hash,
         width: _decodeWidth.round(),
         height: _decodeHeight.round(),
@@ -1195,8 +1214,7 @@ class _BlurHashTabState extends State<BlurHashTab>
 // ═══════════════════════════════════════════════════════════════════════════
 
 class BatchTab extends StatefulWidget {
-  final JustImageEngine engine;
-  const BatchTab({super.key, required this.engine});
+  const BatchTab({super.key});
 
   @override
   State<BatchTab> createState() => _BatchTabState();
@@ -1204,7 +1222,7 @@ class BatchTab extends StatefulWidget {
 
 class _BatchTabState extends State<BatchTab>
     with AutomaticKeepAliveClientMixin {
-  final _picker = ImagePicker();
+  final _picker = picker.ImagePicker();
 
   final List<Uint8List> _inputs = [];
   final List<(ImageResult, Duration)?> _results = [];
@@ -1213,12 +1231,12 @@ class _BatchTabState extends State<BatchTab>
   String? _error;
 
   // Shared settings
-  ImageFormat _format = ImageFormat.webp;
+  OutputConfig _outputConfig = const WebpOutput();
   double _quality = 80;
   bool _doResize = false;
   double _resizeW = 1280;
   double _resizeH = 720;
-  String? _filterName;
+  ArtisticFilterName? _filter;
 
   @override
   bool get wantKeepAlive => true;
@@ -1259,43 +1277,39 @@ class _BatchTabState extends State<BatchTab>
       _error = null;
     });
 
-    final queue = widget.engine.createBatch(concurrency: 4);
-
     try {
-      final futures = <Future<void>>[];
-
+      final pipelines = <ImagePipeline>[];
       for (var i = 0; i < _inputs.length; i++) {
-        final index = i;
-        var pipeline = widget.engine
-            .load(_inputs[i])
-            .toFormat(_format)
-            .quality(_quality.round());
+        var pipeline = _inputs[i].justImage.encode(
+          _outputWithQuality(_outputConfig, _quality.round()),
+        );
 
         if (_doResize) {
           pipeline = pipeline.resize(_resizeW.round(), _resizeH.round());
         }
-        if (_filterName != null) {
-          pipeline = pipeline.filter(_filterName!);
+        if (_filter != null) {
+          pipeline = pipeline.filter(_filter!);
         }
 
-        final sw = Stopwatch()..start();
-        final future = queue.enqueue(pipeline).then((result) {
-          sw.stop();
-          if (mounted) {
-            setState(() {
-              _results[index] = (result, sw.elapsed);
-              _completed++;
-            });
-          }
-        });
-        futures.add(future);
+        pipelines.add(pipeline);
       }
 
-      await Future.wait(futures);
+      final sw = Stopwatch()..start();
+      final batchResults = await JustImage.processBatch(
+        pipelines,
+        concurrency: 4,
+      );
+      sw.stop();
+
+      setState(() {
+        for (var i = 0; i < batchResults.length; i++) {
+          _results[i] = (batchResults[i], sw.elapsed);
+        }
+        _completed = batchResults.length;
+      });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
-      queue.dispose();
       if (mounted) setState(() => _processing = false);
     }
   }
@@ -1323,7 +1337,7 @@ class _BatchTabState extends State<BatchTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final filters = widget.engine.availableFilters;
+    final filters = ArtisticFilterName.values;
     final allDone = _results.isNotEmpty && _results.every((r) => r != null);
 
     return ListView(
@@ -1422,21 +1436,23 @@ class _BatchTabState extends State<BatchTab>
           ),
           const SizedBox(height: 8),
 
-          DropdownButtonFormField<ImageFormat>(
-            initialValue: _format,
+          DropdownButtonFormField<OutputConfig>(
+            initialValue: _outputConfig,
             decoration: const InputDecoration(
               labelText: 'Format',
               border: OutlineInputBorder(),
             ),
-            items: ImageFormat.values
+            items: _outputOptions
                 .map(
-                  (f) => DropdownMenuItem(
-                    value: f,
-                    child: Text(f.value.toUpperCase()),
+                  (o) => DropdownMenuItem(
+                    value: o.format == _outputConfig.format ? _outputConfig : o,
+                    child: Text(o.format.toUpperCase()),
                   ),
                 )
                 .toList(),
-            onChanged: (v) => setState(() => _format = v!),
+            onChanged: (v) => setState(
+              () => _outputConfig = _outputWithQuality(v!, _quality.round()),
+            ),
           ),
           const SizedBox(height: 8),
 
@@ -1450,7 +1466,13 @@ class _BatchTabState extends State<BatchTab>
                   max: 100,
                   divisions: 99,
                   label: _quality.round().toString(),
-                  onChanged: (v) => setState(() => _quality = v),
+                  onChanged: (v) => setState(() {
+                    _quality = v;
+                    _outputConfig = _outputWithQuality(
+                      _outputConfig,
+                      v.round(),
+                    );
+                  }),
                 ),
               ),
               SizedBox(width: 40, child: Text('${_quality.round()}')),
@@ -1497,17 +1519,19 @@ class _BatchTabState extends State<BatchTab>
             const SizedBox(height: 8),
           ],
 
-          DropdownButtonFormField<String?>(
-            initialValue: _filterName,
+          DropdownButtonFormField<ArtisticFilterName?>(
+            initialValue: _filter,
             decoration: const InputDecoration(
               labelText: 'Artistic Filter',
               border: OutlineInputBorder(),
             ),
             items: [
               const DropdownMenuItem(value: null, child: Text('None')),
-              ...filters.map((f) => DropdownMenuItem(value: f, child: Text(f))),
+              ...filters.map(
+                (f) => DropdownMenuItem(value: f, child: Text(f.jsonName)),
+              ),
             ],
-            onChanged: (v) => setState(() => _filterName = v),
+            onChanged: (v) => setState(() => _filter = v),
           ),
           const SizedBox(height: 12),
 

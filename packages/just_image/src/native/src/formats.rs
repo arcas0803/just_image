@@ -1,17 +1,19 @@
 use image::DynamicImage;
 use std::io::Cursor;
 
-/// Codifica una imagen en el formato de salida especificado.
+use crate::pipeline::OutputFormat;
+
+/// Encodes an image to the requested output format.
 pub fn encode_to_format(
     img: &DynamicImage,
-    format: &str,
+    format: OutputFormat,
     quality: u8,
 ) -> Result<Vec<u8>, String> {
     let mut buffer = Vec::new();
-    let mut cursor = Cursor::new(&mut buffer);
 
-    match format.to_lowercase().as_str() {
-        "jpeg" | "jpg" => {
+    match format {
+        OutputFormat::Jpeg => {
+            let mut cursor = Cursor::new(&mut buffer);
             let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
                 &mut cursor,
                 quality,
@@ -19,23 +21,23 @@ pub fn encode_to_format(
             img.write_with_encoder(encoder)
                 .map_err(|e| format!("JPEG encode error: {e}"))?;
         }
-        "png" => {
+        OutputFormat::Png => {
+            let mut cursor = Cursor::new(&mut buffer);
             let encoder = image::codecs::png::PngEncoder::new(&mut cursor);
             img.write_with_encoder(encoder)
                 .map_err(|e| format!("PNG encode error: {e}"))?;
 
-            // Optimizar con oxipng si calidad < 100
+            // Optionally optimize with oxipng when quality < 100.
             if quality < 100 {
                 drop(cursor);
                 let opts = oxipng::Options {
-                    strip: oxipng::StripChunks::None, // Preservar metadatos
+                    strip: oxipng::StripChunks::None,
                     ..oxipng::Options::from_preset(2)
                 };
-                buffer = oxipng::optimize_from_memory(&buffer, &opts)
-                    .unwrap_or(buffer);
+                buffer = oxipng::optimize_from_memory(&buffer, &opts).unwrap_or(buffer);
             }
         }
-        "webp" => {
+        OutputFormat::Webp => {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
             let encoder = webp::Encoder::from_rgba(rgba.as_raw(), w, h);
@@ -46,7 +48,7 @@ pub fn encode_to_format(
             };
             buffer = webp_data.to_vec();
         }
-        "avif" => {
+        OutputFormat::Avif => {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
 
@@ -65,25 +67,24 @@ pub fn encode_to_format(
 
             buffer = result.avif_file;
         }
-        "tiff" => {
+        OutputFormat::Tiff => {
+            let mut cursor = Cursor::new(&mut buffer);
             let encoder = image::codecs::tiff::TiffEncoder::new(&mut cursor);
             img.write_with_encoder(encoder)
                 .map_err(|e| format!("TIFF encode error: {e}"))?;
         }
-        "bmp" => {
+        OutputFormat::Bmp => {
+            let mut cursor = Cursor::new(&mut buffer);
             let encoder = image::codecs::bmp::BmpEncoder::new(&mut cursor);
             img.write_with_encoder(encoder)
                 .map_err(|e| format!("BMP encode error: {e}"))?;
-        }
-        _ => {
-            return Err(format!("Unsupported output format: {format}"));
         }
     }
 
     Ok(buffer)
 }
 
-/// Decodifica bytes a DynamicImage.
+/// Decodes raw bytes into a DynamicImage.
 pub fn decode_image(data: &[u8]) -> Result<DynamicImage, String> {
     image::load_from_memory(data).map_err(|e| format!("Decode error: {e}"))
 }

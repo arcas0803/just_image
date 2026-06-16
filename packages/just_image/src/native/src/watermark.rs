@@ -1,9 +1,10 @@
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::DynamicImage;
 use rayon::prelude::*;
 
-/// Aplica una marca de agua (overlay) con canal alfa sobre la imagen base.
-/// `watermark_data` son los bytes raw de la imagen de watermark (se decodifica).
-/// `x`, `y` posición del overlay. `opacity` en [0.0, 1.0].
+use crate::pixel_ops::blend_pixels;
+
+/// Overlays a watermark image onto the base image with the given position
+/// and opacity.
 pub fn apply_watermark(
     base: &DynamicImage,
     watermark_data: &[u8],
@@ -14,25 +15,25 @@ pub fn apply_watermark(
     let watermark = image::load_from_memory(watermark_data)
         .map_err(|e| format!("Failed to decode watermark: {e}"))?;
 
-    let base_rgba = base.to_rgba8();
+    let mut base_rgba = base.to_rgba8();
     let wm_rgba = watermark.to_rgba8();
     let (base_w, base_h) = base_rgba.dimensions();
     let (wm_w, wm_h) = wm_rgba.dimensions();
 
+    if wm_w == 0 || wm_h == 0 {
+        return Ok(DynamicImage::ImageRgba8(base_rgba));
+    }
+
     let opacity = opacity.clamp(0.0, 1.0);
-
-    let base_raw = base_rgba.as_raw().clone();
-    let wm_raw = wm_rgba.as_raw().clone();
-
-    let mut output = base_raw;
-
-    // Procesar filas que se solapan en paralelo
-    let y_start = y.max(0) as u32;
-    let y_end = ((y + wm_h as i32) as u32).min(base_h);
-
+    let wm_raw = wm_rgba.as_raw();
     let row_stride = base_w as usize * 4;
 
-    output
+    let y_start = y.max(0) as u32;
+    let y_end = ((y + wm_h as i32) as u32).min(base_h);
+    let x_start = x.max(0) as u32;
+    let x_end = ((x + wm_w as i32) as u32).min(base_w);
+
+    base_rgba
         .par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(row_idx, row)| {
@@ -46,9 +47,6 @@ pub fn apply_watermark(
                 return;
             }
 
-            let x_start = x.max(0) as u32;
-            let x_end = ((x + wm_w as i32) as u32).min(base_w);
-
             for bx in x_start..x_end {
                 let wm_x = (bx as i32 - x) as u32;
                 if wm_x >= wm_w {
@@ -58,23 +56,23 @@ pub fn apply_watermark(
                 let base_idx = (bx as usize) * 4;
                 let wm_idx = ((wm_y * wm_w + wm_x) as usize) * 4;
 
-                let wm_a = wm_raw[wm_idx + 3] as f32 / 255.0 * opacity;
-                let inv_a = 1.0 - wm_a;
+                let base_px = [
+                    row[base_idx],
+                    row[base_idx + 1],
+                    row[base_idx + 2],
+                    row[base_idx + 3],
+                ];
+                let wm_px = [
+                    wm_raw[wm_idx],
+                    wm_raw[wm_idx + 1],
+                    wm_raw[wm_idx + 2],
+                    wm_raw[wm_idx + 3],
+                ];
 
-                for c in 0..3 {
-                    let base_c = row[base_idx + c] as f32;
-                    let wm_c = wm_raw[wm_idx + c] as f32;
-                    row[base_idx + c] = (base_c * inv_a + wm_c * wm_a).clamp(0.0, 255.0) as u8;
-                }
-                // Alpha: combinar
-                let base_a = row[base_idx + 3] as f32 / 255.0;
-                let out_a = wm_a + base_a * inv_a;
-                row[base_idx + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+                let blended = blend_pixels(base_px, wm_px, opacity);
+                row[base_idx..base_idx + 4].copy_from_slice(&blended);
             }
         });
 
-    let img_buf = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(base_w, base_h, output)
-        .ok_or_else(|| "Failed to create output buffer".to_string())?;
-
-    Ok(DynamicImage::ImageRgba8(img_buf))
+    Ok(DynamicImage::ImageRgba8(base_rgba))
 }

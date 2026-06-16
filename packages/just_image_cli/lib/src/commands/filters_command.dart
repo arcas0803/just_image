@@ -13,15 +13,10 @@ class FiltersCommand extends Command<void> {
 
   @override
   void run() {
-    final engine = JustImageEngine();
-    try {
-      final filters = engine.availableFilters;
-      stdout.writeln('Available filters (${filters.length}):');
-      for (final filter in filters) {
-        stdout.writeln('  • $filter');
-      }
-    } finally {
-      engine.dispose();
+    final filters = ArtisticFilterName.values;
+    stdout.writeln('Available filters (${filters.length}):');
+    for (final filter in filters) {
+      stdout.writeln('  • ${filter.jsonName}');
     }
   }
 }

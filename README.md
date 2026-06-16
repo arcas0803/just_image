@@ -4,13 +4,15 @@ Monorepo de procesamiento de imágenes para Dart y Flutter, impulsado por un nú
 
 ## Qué incluye
 
-Este repositorio se divide en tres paquetes independientes:
+Este repositorio se divide en tres paquetes:
 
-| Paquete | Rol |
-|---|---|
-| [`just_image`](packages/just_image/) | Núcleo de la librería. Expone la API de procesamiento, el puente FFI y la compilación nativa automática. |
-| [`just_image_cli`](packages/just_image_cli/) | Interfaz de línea de comandos para convertir, transformar e inspeccionar imágenes desde terminal. |
-| [`just_image_flutter`](packages/just_image_flutter/) | Plugin Flutter sin widgets ni UI. Solo activa `ffiPlugin: true` para que Flutter empaquete el binario nativo. |
+| Paquete | Rol | Estado |
+|---|---|---|
+| [`just_image`](packages/just_image/) | Núcleo de la librería. Expone la API de procesamiento, el puente FFI y la compilación nativa automática. | **Activo** — punto de entrada único para Dart y Flutter |
+| [`just_image_cli`](packages/just_image_cli/) | Interfaz de línea de comandos para convertir, transformar e inspeccionar imágenes desde terminal. | **Discontinuado** — usar `just_image` directamente |
+| [`just_image_flutter`](packages/just_image_flutter/) | Plugin Flutter sin widgets ni UI. Solo activaba `ffiPlugin: true` para que Flutter empaquetara el binario nativo. | **Discontinuado** — usar `just_image` directamente |
+
+> Los paquetes `just_image_cli` e `just_image_flutter` se marcarán como **discontinuados** en pub.dev en su siguiente publicación. El paquete `just_image` ahora es el único punto de entrada y funciona directamente en cualquier entorno Dart (CLI, servidores, Flutter, etc.) gracias a su `hook/build.dart` de Native Assets.
 
 ## Capacidades principales
 
@@ -28,27 +30,56 @@ Este repositorio se divide en tres paquetes independientes:
 
 ## Cómo se usa cada paquete
 
-- `just_image`: para proyectos Dart, servidores, herramientas y cualquier runtime Dart sin Flutter
-- `just_image_cli`: para uso desde terminal y scripts de automatización
-- `just_image_flutter`: para apps Flutter que quieran reutilizar la misma API de `just_image`
+- `just_image`: para proyectos Dart, servidores, herramientas **y apps Flutter**. Es el único paquete necesario.
+- `just_image_cli`: **discontinuado**. Para nuevas herramientas de terminal, depende de `just_image` directamente.
+- `just_image_flutter`: **discontinuado**. Para nuevas apps Flutter, depende de `just_image` directamente.
 
 ## Ejemplo rápido
+
+```yaml
+dependencies:
+  just_image: ^1.0.3
+```
 
 ```dart
 import 'package:just_image/just_image.dart';
 
 // Pipeline con filtro artístico y thumbnail
-final result = await ImagePipeline(imageBytes)
-    .filter('cinematic')
+final result = await imageBytes
+    .justImage
+    .filter(ArtisticFilterName.cinematic)
     .thumbnail(400, 300)
-    .toFormat(ImageFormat.webp)
-    .quality(85)
-    .execute();
+    .encode(const WebpOutput(quality: 85))
+    .run();
+
+// Desde File o XFile
+final result2 = await File('photo.jpg')
+    .justImage
+    .resize(800, 600)
+    .encode(const JpegOutput(quality: 90))
+    .run();
 
 // BlurHash para placeholders
-final engine = JustImageEngine();
-final hash = await engine.blurHashEncode(imageBytes);
+final hash = await JustImage.blurHashEncode(BytesSource(imageBytes));
 print(hash); // ej: "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+
+// Batch homogéneo
+final results = await JustImage.processBatch([
+  file1.justImage.resize(100, 100).encode(const JpegOutput()),
+  file2.justImage.resize(100, 100).encode(const JpegOutput()),
+], concurrency: 4);
+```
+
+### Flutter
+
+```bash
+flutter run --enable-experiment=native-assets
+```
+
+### Dart CLI / servidores
+
+```bash
+dart --enable-experiment=native-assets run bin/main.dart
 ```
 
 ## Licencia

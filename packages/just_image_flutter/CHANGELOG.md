@@ -1,3 +1,12 @@
+## 1.0.4
+
+- Version bump to keep monorepo in sync.
+
+## 1.0.3
+
+- **DISCONTINUED**: This Flutter wrapper is no longer maintained.
+- Users should depend on `just_image` directly for new Flutter projects.
+
 ## 1.0.2
 
 - Updated dependency to `just_image ^1.0.2`.

@@ -1,15 +1,16 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+// ignore_for_file: deprecated_export_use
 import 'package:just_image_flutter/just_image_flutter.dart';
 
 void main() {
   group('just_image_flutter re-exports', () {
-    test('ImageFormat enum is accessible', () {
-      expect(ImageFormat.jpeg.value, 'jpeg');
-      expect(ImageFormat.png.value, 'png');
-      expect(ImageFormat.webp.value, 'webp');
-      expect(ImageFormat.avif.value, 'avif');
+    test('OutputConfig classes are accessible', () {
+      expect(const JpegOutput().format, 'jpeg');
+      expect(const PngOutput().format, 'png');
+      expect(const WebpOutput().format, 'webp');
+      expect(const AvifOutput().format, 'avif');
     });
 
     test('ImageResult is constructible', () {
@@ -26,32 +27,26 @@ void main() {
     });
 
     test('ImagePipeline is constructible', () {
-      final pipeline = ImagePipeline(Uint8List(10));
+      final pipeline = ImagePipeline.bytes(Uint8List(10));
       expect(pipeline, isA<ImagePipeline>());
     });
 
     test('filter and thumbnail are chainable', () {
-      final pipeline = ImagePipeline(
+      final pipeline = ImagePipeline.bytes(
         Uint8List(10),
-      ).filter('vintage').thumbnail(200, 200);
+      ).filter(ArtisticFilterName.vintage).thumbnail(200, 200);
       expect(pipeline, isA<ImagePipeline>());
     });
 
-    test('JustImageEngine is constructible', () {
-      // JustImageEngine loads the native library via FFI.
-      // In unit-test mode the Rust dylib may not be compiled,
-      // so we accept NativeLibraryException as a valid outcome.
-      try {
-        final engine = JustImageEngine();
-        expect(engine, isA<JustImageEngine>());
-      } on NativeLibraryException {
-        // Expected when the Rust library is not compiled.
-      }
+    test('JustImage is accessible', () {
+      expect(JustImage, isNotNull);
     });
 
-    test('FlipDirection is accessible', () {
-      expect(FlipDirection.horizontal, isNotNull);
-      expect(FlipDirection.vertical, isNotNull);
+    test('flip methods are accessible', () {
+      final pipeline = ImagePipeline.bytes(
+        Uint8List(10),
+      ).flipHorizontal().flipVertical();
+      expect(pipeline, isA<ImagePipeline>());
     });
 
     test('Exception hierarchy is accessible', () {

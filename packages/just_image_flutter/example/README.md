@@ -1,17 +1,19 @@
 # just_image_flutter_example
 
-A new Flutter project.
+Example Flutter app demonstrating `just_image` direct integration.
 
-## Getting Started
+> This example previously depended on the `just_image_flutter` wrapper, which is
+> now discontinued. It uses `package:just_image` directly.
 
-This project is a starting point for a Flutter application.
+## Run
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter run --enable-experiment=native-assets
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+For Android builds, make sure the Android NDK is available and the required
+Rust targets are installed:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+```

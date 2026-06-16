@@ -1,23 +1,127 @@
 use serde::{Deserialize, Serialize};
 
-/// Configuración completa del pipeline de procesamiento.
-/// Se pasa desde Dart como JSON serializado.
+/// Complete image processing pipeline configuration.
+/// Passed from Dart as serialized JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
-    /// Formato de salida: "jpeg", "png", "webp", "avif", "tiff", "bmp"
-    pub output_format: String,
-    /// Calidad de compresión (1-100)
+    /// Output image format.
+    pub output_format: OutputFormat,
+    /// Compression quality (1-100).
     pub quality: u8,
-    /// Auto-orientar según EXIF
+    /// Auto-orient according to EXIF.
     pub auto_orient: bool,
-    /// Preservar metadatos EXIF
+    /// Preserve EXIF metadata.
     pub preserve_metadata: bool,
-    /// Preservar perfil ICC
+    /// Preserve ICC colour profile.
     pub preserve_icc: bool,
-    /// Lista ordenada de operaciones a aplicar
+    /// Ordered list of operations to apply.
     pub operations: Vec<Operation>,
 }
 
+impl Default for PipelineConfig {
+    fn default() -> Self {
+        Self {
+            output_format: OutputFormat::Jpeg,
+            quality: 90,
+            auto_orient: true,
+            preserve_metadata: true,
+            preserve_icc: true,
+            operations: Vec::new(),
+        }
+    }
+}
+
+/// Supported output image formats.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    Jpeg,
+    Png,
+    Webp,
+    Avif,
+    Tiff,
+    Bmp,
+}
+
+impl OutputFormat {
+    /// Returns the canonical string representation used in FFI/JSON.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Png => "png",
+            Self::Webp => "webp",
+            Self::Avif => "avif",
+            Self::Tiff => "tiff",
+            Self::Bmp => "bmp",
+        }
+    }
+}
+
+/// Available artistic filters.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtisticFilter {
+    Vintage,
+    Sepia,
+    Cool,
+    Warm,
+    Marine,
+    Dramatic,
+    Lomo,
+    Retro,
+    Noir,
+    Bloom,
+    Polaroid,
+    #[serde(rename = "golden_hour")]
+    GoldenHour,
+    Arctic,
+    Cinematic,
+    Fade,
+}
+
+impl ArtisticFilter {
+    /// All available artistic filters.
+    pub const ALL: [Self; 15] = [
+        Self::Vintage,
+        Self::Sepia,
+        Self::Cool,
+        Self::Warm,
+        Self::Marine,
+        Self::Dramatic,
+        Self::Lomo,
+        Self::Retro,
+        Self::Noir,
+        Self::Bloom,
+        Self::Polaroid,
+        Self::GoldenHour,
+        Self::Arctic,
+        Self::Cinematic,
+        Self::Fade,
+    ];
+
+    /// Returns the canonical snake_case name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Vintage => "vintage",
+            Self::Sepia => "sepia",
+            Self::Cool => "cool",
+            Self::Warm => "warm",
+            Self::Marine => "marine",
+            Self::Dramatic => "dramatic",
+            Self::Lomo => "lomo",
+            Self::Retro => "retro",
+            Self::Noir => "noir",
+            Self::Bloom => "bloom",
+            Self::Polaroid => "polaroid",
+            Self::GoldenHour => "golden_hour",
+            Self::Arctic => "arctic",
+            Self::Cinematic => "cinematic",
+            Self::Fade => "fade",
+        }
+    }
+}
+
+/// A single processing operation in the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Operation {
@@ -45,36 +149,12 @@ pub enum Operation {
     HslAdjust { hue: f32, saturation: f32, lightness: f32 },
     #[serde(rename = "watermark")]
     Watermark {
-        /// Puntero y longitud del overlay se pasan por separado
         x: i32,
         y: i32,
         opacity: f32,
     },
     #[serde(rename = "filter")]
-    Filter { name: String },
+    Filter { name: ArtisticFilter },
     #[serde(rename = "thumbnail")]
     Thumbnail { max_width: u32, max_height: u32 },
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            output_format: "jpeg".to_string(),
-            quality: 90,
-            auto_orient: true,
-            preserve_metadata: true,
-            preserve_icc: true,
-            operations: Vec::new(),
-        }
-    }
-}
-
-/// Resultado devuelto al caller (Dart) con el buffer de salida.
-#[derive(Debug)]
-pub struct ProcessingResult {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub format: String,
-    pub error: Option<String>,
 }

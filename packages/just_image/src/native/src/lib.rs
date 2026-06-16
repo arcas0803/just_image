@@ -9,3 +9,4 @@ pub mod watermark;
 pub mod filters;
 pub mod thumbnail;
 pub mod blurhash_bridge;
+pub mod pixel_ops;
