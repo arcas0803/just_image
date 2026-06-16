@@ -22,15 +22,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        working-directory: packages/just_image
         run: dart pub get
 
       - name: Run tests
-        working-directory: packages/just_image
         run: dart test
 
       - name: Verify version matches tag
-        working-directory: packages/just_image
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           PKG_VERSION=$(grep '^version:' pubspec.yaml | cut -d' ' -f2)
@@ -41,5 +38,4 @@ jobs:
           echo "Version verified: $TAG_VERSION"
 
       - name: Publish just_image
-        working-directory: packages/just_image
         run: dart pub publish --force

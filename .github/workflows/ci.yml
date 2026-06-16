@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/just_image/src/native
+        working-directory: src/native
     steps:
       - uses: actions/checkout@v4
 
@@ -34,8 +34,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            packages/just_image/src/native/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/just_image/src/native/Cargo.lock') }}
+            src/native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src/native/Cargo.lock') }}
 
       - name: Format check
         run: cargo fmt --check
@@ -67,23 +67,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust native library
-        working-directory: packages/just_image/src/native
+        working-directory: src/native
         run: cargo build --release
 
       - name: Install dependencies
-        working-directory: packages/just_image
         run: dart pub get
 
       - name: Analyze
-        working-directory: packages/just_image
         run: dart analyze --fatal-infos
 
       - name: Format check
-        working-directory: packages/just_image
         run: dart format --output=none --set-exit-if-changed .
 
       - name: Test just_image
-        working-directory: packages/just_image
         run: dart test
         env:
           LD_LIBRARY_PATH: src/native/target/release
@@ -107,9 +103,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        working-directory: packages/just_image
         run: dart pub get
 
       - name: Dry run - just_image
-        working-directory: packages/just_image
         run: dart pub publish --dry-run

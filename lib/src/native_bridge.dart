@@ -208,20 +208,14 @@ class NativeBridge {
       return DynamicLibrary.open(cargoDefaultPath);
     } catch (_) {}
 
-    // 6. Workspace-relative cargo build (running from repo root).
+    // 6. Cargo target directory with explicit host triple.
     if (hostTriple != null) {
       try {
-        final workspacePath =
-            '${Directory.current.path}/packages/just_image/src/native/target/$hostTriple/release/$libName';
-        return DynamicLibrary.open(workspacePath);
+        final targetPath =
+            '${Directory.current.path}/src/native/target/$hostTriple/release/$libName';
+        return DynamicLibrary.open(targetPath);
       } catch (_) {}
     }
-
-    try {
-      final workspaceDefaultPath =
-          '${Directory.current.path}/packages/just_image/src/native/target/release/$libName';
-      return DynamicLibrary.open(workspaceDefaultPath);
-    } catch (_) {}
 
     // 7. Legacy fallback.
     try {

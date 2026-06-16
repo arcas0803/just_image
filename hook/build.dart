@@ -151,12 +151,16 @@ Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
   }
 
   final cCompiler = code.cCompiler;
-  if (cCompiler != null) {
-    _applyCCompilerConfig(env, code, cCompiler);
-  }
-
   if (os == OS.android) {
-    _configureAndroid(env, code);
+    // Native Assets can provide the Android NDK toolchain directly. Prefer it
+    // and only fall back to manual NDK discovery when it is absent.
+    if (cCompiler != null) {
+      _applyAndroidCCompilerConfig(env, code, cCompiler);
+    } else {
+      _configureAndroid(env, code);
+    }
+  } else if (cCompiler != null) {
+    _applyCCompilerConfig(env, code, cCompiler);
   }
 
   return env;
@@ -275,16 +279,15 @@ Future<void> _configureAppleTarget(
 
   final sdkPath = await _xcrunSdkPath(sdk);
   final target = _rustTarget(code);
-  final targetEnv = target.toUpperCase().replaceAll('-', '_');
+  final ccTarget = _ccTargetEnv(target);
+  final cargoTarget = _cargoTargetEnv(target);
 
   final compilerPath =
       cCompiler?.compiler.toFilePath() ?? await _xcrunToolPath(sdk, 'clang');
-  final linkerPath =
-      cCompiler?.linker.toFilePath() ?? await _xcrunToolPath(sdk, 'clang');
   final archiverPath =
       cCompiler?.archiver.toFilePath() ?? await _xcrunToolPath(sdk, 'ar');
 
-  if (compilerPath == null || linkerPath == null || archiverPath == null) {
+  if (compilerPath == null || archiverPath == null) {
     throw Exception(
       'Could not locate Apple toolchain for $sdk. '
       'Ensure Xcode Command Line Tools are installed.',
@@ -313,11 +316,12 @@ Future<void> _configureAppleTarget(
     }
   }
 
-  env['CC_$targetEnv'] = compilerPath;
-  env['CXX_$targetEnv'] = compilerPath;
-  env['AR_$targetEnv'] = archiverPath;
-  env['CFLAGS_$targetEnv'] = targetCFlags;
-  env['CXXFLAGS_$targetEnv'] = targetCFlags;
+  // cc crate expects lowercase target names; Cargo uses uppercase.
+  env['CC_$ccTarget'] = compilerPath;
+  env['CXX_$ccTarget'] = compilerPath;
+  env['AR_$ccTarget'] = archiverPath;
+  env['CFLAGS_$ccTarget'] = targetCFlags;
+  env['CXXFLAGS_$ccTarget'] = targetCFlags;
 
   // Cargo's CARGO_TARGET_<TRIPLE>_LINKER must be a single executable path.
   // Use a wrapper script so linker flags are applied only to the target.
@@ -331,7 +335,7 @@ Future<void> _configureAppleTarget(
 exec "$compilerPath" $escapedFlags "\$@"
 ''');
   await Process.run('chmod', ['+x', wrapperFile.path]);
-  env['CARGO_TARGET_${targetEnv}_LINKER'] = wrapperFile.path;
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = wrapperFile.path;
 }
 
 /// Runs `xcrun --sdk <sdk> --show-sdk-path` and returns the path.
@@ -363,19 +367,55 @@ Future<String?> _xcrunToolPath(String sdk, String tool) async {
 }
 
 /// Applies the C compiler configuration provided by Native Assets.
+///
+/// Uses lowercase target names for the `cc` crate (`CC_*`, `CXX_*`, `AR_*`)
+/// and the uppercase Cargo convention for `CARGO_TARGET_*_LINKER`.
 void _applyCCompilerConfig(
   Map<String, String> env,
   CodeConfig code,
   CCompilerConfig cCompiler,
 ) {
   final target = _rustTarget(code);
-  final targetEnv = target.toUpperCase().replaceAll('-', '_');
+  final ccTarget = _ccTargetEnv(target);
+  final cargoTarget = _cargoTargetEnv(target);
 
-  env['CC_$targetEnv'] = cCompiler.compiler.toFilePath();
-  env['CXX_$targetEnv'] = cCompiler.linker.toFilePath();
-  env['AR_$targetEnv'] = cCompiler.archiver.toFilePath();
-  env['CARGO_TARGET_${targetEnv}_LINKER'] = cCompiler.linker.toFilePath();
+  env['CC_$ccTarget'] = cCompiler.compiler.toFilePath();
+  env['CXX_$ccTarget'] = _cxxFromCompiler(cCompiler.compiler.toFilePath());
+  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = cCompiler.linker.toFilePath();
 }
+
+/// Applies the C compiler configuration from Native Assets specifically for
+/// Android, where the NDK clang compiler doubles as the linker.
+void _applyAndroidCCompilerConfig(
+  Map<String, String> env,
+  CodeConfig code,
+  CCompilerConfig cCompiler,
+) {
+  final target = _rustTarget(code);
+  final ccTarget = _ccTargetEnv(target);
+  final cargoTarget = _cargoTargetEnv(target);
+  final compiler = cCompiler.compiler.toFilePath();
+
+  env['CC_$ccTarget'] = compiler;
+  env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
+  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+}
+
+/// Derives a likely C++ compiler path from a C compiler path.
+String _cxxFromCompiler(String compiler) {
+  final cxx = '$compiler++';
+  return File(cxx).existsSync() ? cxx : compiler;
+}
+
+/// Lowercase target triple used by the `cc` crate for environment variables.
+String _ccTargetEnv(String rustTarget) =>
+    rustTarget.toLowerCase().replaceAll('-', '_');
+
+/// Uppercase target triple used by Cargo for target configuration.
+String _cargoTargetEnv(String rustTarget) =>
+    rustTarget.toUpperCase().replaceAll('-', '_');
 
 /// Configures Android NDK toolchain environment variables.
 ///
@@ -417,7 +457,8 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
   ];
 
   for (final (rustTarget, clangPrefix) in targets) {
-    final targetEnv = rustTarget.toUpperCase().replaceAll('-', '_');
+    final ccTarget = _ccTargetEnv(rustTarget);
+    final cargoTarget = _cargoTargetEnv(rustTarget);
 
     final compiler = _findAndroidCompiler(toolchain, clangPrefix, requestedApi);
     if (compiler == null) {
@@ -428,18 +469,19 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
       );
     }
 
-    // The C++ compiler is the same binary with a '++' suffix. Recent NDKs
-    // provide both clang and clang++ front-ends.
-    final cxxCompiler = '$compiler++';
-    final cxxCompilerFile = File(cxxCompiler);
-
-    env['CARGO_TARGET_${targetEnv}_LINKER'] = compiler;
-    env['CC_$targetEnv'] = compiler;
-    env['CXX_$targetEnv'] = cxxCompilerFile.existsSync() ? cxxCompiler : compiler;
-
-    final ar = '$toolchain/llvm-ar';
-    env['AR_$targetEnv'] = File(ar).existsSync() ? ar : 'llvm-ar';
+    env['CC_$ccTarget'] = compiler;
+    env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
+    env['AR_$ccTarget'] = _findAndroidAr(toolchain);
+    env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
   }
+}
+
+/// Finds the Android archiver, preferring `llvm-ar` in the toolchain.
+String _findAndroidAr(String toolchain) {
+  final llvmAr = '$toolchain/llvm-ar';
+  if (File(llvmAr).existsSync()) return llvmAr;
+  // Very old NDKs shipped a target-prefixed ar.
+  return 'llvm-ar';
 }
 
 /// Finds a working Android clang compiler in [toolchainDir] for [clangPrefix].

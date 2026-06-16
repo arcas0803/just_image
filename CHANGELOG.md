@@ -1,18 +1,47 @@
+## 1.0.6
+
+- Flattened repository: removed the Dart workspace and moved the package to the repository root.
+- Fixed Android build on macOS: use lowercase target names for `cc` crate environment variables (`CC_aarch64_linux_android`, etc.).
+- Prefer the `CCompilerConfig` provided by Native Assets for Android; fall back to manual NDK detection only when absent.
+
 ## 1.0.5
 
-- Fixed Android NDK compiler detection in `just_image`.
+- Fixed Android NDK compiler detection: fall back from the requested API level to the unversioned `*-clang` symlink, then to the highest available API-level compiler.
 - Removed discontinued `just_image_cli` and `just_image_flutter` packages from the repository.
 
 ## 1.0.4
 
 - Migrated Native Assets build hook to `package:hooks` + `package:code_assets`.
-- Fixed iOS simulator compilation in `just_image`.
+- Fixed iOS simulator compilation: correct `aarch64-apple-ios-sim` / `x86_64-apple-ios-sim` target triple selection.
+- iOS architecture now respects `targetArchitecture` instead of defaulting to `arm64`.
+- Linker wrapper now uses the compiler driver (`clang`) so Apple SDK flags are parsed correctly.
 
 ## 1.0.3
 
-- `just_image` core is now the single entry point for Dart and Flutter apps.
-- `just_image_cli` and `just_image_flutter` are discontinued; users should depend on `just_image` directly.
+- Core package is now the single entry point for both Dart and Flutter apps.
+- Documented direct Flutter usage; no wrapper plugin is required anymore.
+- `just_image_cli` and `just_image_flutter` are discontinued — depend on `just_image` directly.
+
+## 1.0.2
+
+- Android: auto-install missing Rust targets via `rustup target add` during build.
+- Android: auto-detect Android NDK location from `ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT`, `ANDROID_HOME/ndk/`, or platform defaults — no manual configuration required.
+- Android: configure Cargo linkers for `aarch64-linux-android`, `armv7-linux-androideabi`, and `x86_64-linux-android` automatically.
+- Android: API level is configurable via `ANDROID_MIN_SDK_VERSION` env var (default: `21`).
+- Android: fallback from `darwin-arm64` to `darwin-x86_64` prebuilt toolchain for NDK < 23 on Apple Silicon.
+
+## 1.0.1
+
+- 15 artistic filters: vintage, sepia, cool, warm, marine, dramatic, lomo, retro, noir, bloom, polaroid, golden_hour, arctic, cinematic, fade.
+- Thumbnail generation preserving aspect ratio.
+- BlurHash encode and decode support.
+- `ImagePipeline.filter()` and `ImagePipeline.thumbnail()` chainable methods.
+- `JustImageEngine.blurHashEncode()`, `blurHashDecode()`, and `availableFilters`.
 
 ## 1.0.0
 
-- Initial version.
+- Initial release as standalone package in monorepo.
+- High-performance Rust FFI engine with Native Assets build hook.
+- Fluent pipeline API for transforms, effects, and format conversions.
+- Batch processing queue with priority support.
+- Custom exception hierarchy.

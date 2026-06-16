@@ -19,3 +19,7 @@ pubspec.lock
 
 # Flutter/Dart build output
 build/
+
+# Agent tooling
+.agents/
+skills-lock.json
