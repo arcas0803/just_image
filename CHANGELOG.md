@@ -1,3 +1,7 @@
+## 1.0.8
+
+- Fixed Android cross-compilation on macOS: use the versioned NDK clang script (e.g. `aarch64-linux-android29-clang`) as the Cargo linker instead of the generic `clang` binary. The versioned script has the correct `--target` baked in and routes to the NDK's own `ld.lld`, avoiding both the `ld64.lld` (Mach-O) and the untargeted-clang macOS-flags issues that caused linker failures in v1.0.7.
+
 ## 1.0.7
 
 - Fixed Android cross-compilation on macOS: NDK `clang` now uses `lld` (ELF linker) instead of `ld64.lld` (Mach-O linker) via a wrapper script that passes `-fuse-ld=lld`. This resolves linker errors (`unknown argument '--version-script'`, `--as-needed`, `-Bstatic`, etc.) when building for `aarch64-linux-android` and other Android targets.
