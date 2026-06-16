@@ -3,7 +3,7 @@ description: >-
   High-performance image processing engine powered by Rust FFI.
   Supports AVIF, WebP, JPEG, PNG, TIFF, BMP with zero-copy
   memory, SIMD acceleration, and professional metadata preservation.
-version: 1.0.6
+version: 1.0.7
 repository: https://github.com/arcas0803/just_image
 homepage: https://github.com/arcas0803/just_image
 topics:
@@ -21,7 +21,6 @@ dependencies:
   cross_file: ^0.3.4+2
   ffi: ^2.2.0
   hooks: ^2.0.0
-  logging: ^1.3.0
 
 dev_dependencies:
   lints: ^6.0.0

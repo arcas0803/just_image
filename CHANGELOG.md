@@ -1,3 +1,8 @@
+## 1.0.7
+
+- Fixed Android cross-compilation on macOS: NDK `clang` now uses `lld` (ELF linker) instead of `ld64.lld` (Mach-O linker) via a wrapper script that passes `-fuse-ld=lld`. This resolves linker errors (`unknown argument '--version-script'`, `--as-needed`, `-Bstatic`, etc.) when building for `aarch64-linux-android` and other Android targets.
+- Removed unused `logging` dependency from `pubspec.yaml`.
+
 ## 1.0.6
 
 - Flattened repository: removed the Dart workspace and moved the package to the repository root.

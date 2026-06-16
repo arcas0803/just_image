@@ -26,7 +26,7 @@ Future<void> main(List<String> args) async {
     final linkMode = _chooseLinkMode(codeConfig);
     final libName = codeConfig.targetOS.libraryFileName(_baseName, linkMode);
 
-    final env = await _cargoEnv(codeConfig);
+    final env = await _cargoEnv(codeConfig, input.outputDirectory);
     if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
       final appleEnv = await _appleEnv(
         codeConfig,
@@ -141,7 +141,10 @@ LinkMode _chooseLinkMode(CodeConfig code) {
 
 /// Builds the environment for cargo, stripping Xcode-injected variables that
 // conflict with Rust's cc crate and configuring cross-compilation toolchains.
-Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
+Future<Map<String, String>> _cargoEnv(
+  CodeConfig code,
+  Uri outputDirectory,
+) async {
   final env = Map<String, String>.from(Platform.environment);
   final os = code.targetOS;
 
@@ -155,9 +158,9 @@ Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
     // Native Assets can provide the Android NDK toolchain directly. Prefer it
     // and only fall back to manual NDK discovery when it is absent.
     if (cCompiler != null) {
-      _applyAndroidCCompilerConfig(env, code, cCompiler);
+      await _applyAndroidCCompilerConfig(env, code, cCompiler, outputDirectory);
     } else {
-      _configureAndroid(env, code);
+      await _configureAndroid(env, code, outputDirectory);
     }
   } else if (cCompiler != null) {
     _applyCCompilerConfig(env, code, cCompiler);
@@ -387,11 +390,15 @@ void _applyCCompilerConfig(
 
 /// Applies the C compiler configuration from Native Assets specifically for
 /// Android, where the NDK clang compiler doubles as the linker.
-void _applyAndroidCCompilerConfig(
+///
+/// On macOS the NDK clang defaults to `ld64.lld` (Mach-O linker) which
+/// rejects GNU/ELF flags. A wrapper script forces `-fuse-ld=lld`.
+Future<void> _applyAndroidCCompilerConfig(
   Map<String, String> env,
   CodeConfig code,
   CCompilerConfig cCompiler,
-) {
+  Uri outputDirectory,
+) async {
   final target = _rustTarget(code);
   final ccTarget = _ccTargetEnv(target);
   final cargoTarget = _cargoTargetEnv(target);
@@ -400,7 +407,18 @@ void _applyAndroidCCompilerConfig(
   env['CC_$ccTarget'] = compiler;
   env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
   env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
-  env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+
+  // On macOS, force the ELF lld linker via a wrapper to avoid ld64.lld.
+  if (Platform.isMacOS) {
+    final linker = await _createAndroidLinkerWrapper(
+      compiler,
+      target,
+      outputDirectory,
+    );
+    env['CARGO_TARGET_${cargoTarget}_LINKER'] = linker;
+  } else {
+    env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+  }
 }
 
 /// Derives a likely C++ compiler path from a C compiler path.
@@ -424,7 +442,11 @@ String _cargoTargetEnv(String rustTarget) =>
 /// highest available API level. This avoids failures when the installed NDK
 /// does not include a compiler for the exact API level requested by the
 /// build environment.
-void _configureAndroid(Map<String, String> env, CodeConfig code) {
+Future<void> _configureAndroid(
+  Map<String, String> env,
+  CodeConfig code,
+  Uri outputDirectory,
+) async {
   final ndkHome = _findNdkHome();
   if (ndkHome == null) {
     throw Exception(
@@ -472,8 +494,39 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
     env['CC_$ccTarget'] = compiler;
     env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
     env['AR_$ccTarget'] = _findAndroidAr(toolchain);
-    env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+
+    // On macOS, force the ELF lld linker via a wrapper to avoid ld64.lld.
+    if (Platform.isMacOS) {
+      final linker = await _createAndroidLinkerWrapper(
+        compiler,
+        rustTarget,
+        outputDirectory,
+      );
+      env['CARGO_TARGET_${cargoTarget}_LINKER'] = linker;
+    } else {
+      env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+    }
   }
+}
+
+/// Creates a shell wrapper that forces the ELF `lld` linker for Android
+/// cross-compilation on macOS.
+///
+/// Without this, macOS resolves to `ld64.lld` (the Mach-O linker) which
+/// does not understand GNU/ELF flags emitted by rustc.
+Future<String> _createAndroidLinkerWrapper(
+  String compiler,
+  String rustTarget,
+  Uri outputDirectory,
+) async {
+  final wrapperUri =
+      outputDirectory.resolve('${rustTarget}_android_linker.sh');
+  final wrapperFile = File(wrapperUri.toFilePath());
+  await wrapperFile.writeAsString(
+    '#!/bin/sh\nexec "$compiler" -fuse-ld=lld "\$@"\n',
+  );
+  await Process.run('chmod', ['+x', wrapperFile.path]);
+  return wrapperFile.path;
 }
 
 /// Finds the Android archiver, preferring `llvm-ar` in the toolchain.
