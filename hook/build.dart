@@ -31,10 +31,29 @@ Future<void> main(List<String> args) async {
     final linkMode = DynamicLoadingBundled();
     final libName = codeConfig.targetOS.libraryFileName(_baseName, linkMode);
 
-    // Determine whether to compile locally or download a pre-built binary.
-    final localBuild = input.userDefines['local_build'] as bool? ?? false;
+    // Released packages always prefer verified pre-built binaries, regardless
+    // of whether Cargo happens to be installed on the consumer machine.
+    // While developing a version whose hashes are still PENDING, local source
+    // compilation remains available automatically.
+    final variant = _binaryVariant(codeConfig);
+    final artifactName = binaryFileName(
+      codeConfig.targetOS.name,
+      codeConfig.targetArchitecture.name,
+      variant: variant,
+    );
+    final requestedLocalBuild =
+        input.userDefines['local_build'] as bool? ?? false;
+    final localBuild = requestedLocalBuild || !hasPublishedBinary(artifactName);
 
-    if (localBuild || await hasRustToolchain()) {
+    if (localBuild) {
+      if (!await hasRustToolchain()) {
+        throw BuildError(
+          message:
+              'No pre-built just_image binary is published for $artifactName '
+              'and a Rust toolchain was not found. This package version is not '
+              'ready for zero-configuration installation on this target.',
+        );
+      }
       await _compileWithCargo(
         input: input,
         output: output,
@@ -51,6 +70,7 @@ Future<void> main(List<String> args) async {
         codeConfig: codeConfig,
         linkMode: linkMode,
         libName: libName,
+        variant: variant,
       );
     }
   });
@@ -152,6 +172,7 @@ Future<void> _downloadPrebuilt({
   required CodeConfig codeConfig,
   required LinkMode linkMode,
   required String libName,
+  String? variant,
 }) async {
   final osName = codeConfig.targetOS.name;
   final archName = codeConfig.targetArchitecture.name;
@@ -160,15 +181,15 @@ Future<void> _downloadPrebuilt({
   final file = await downloadBinary(
     os: osName,
     arch: archName,
+    variant: variant,
     outputDir: outputDir,
   );
 
-  // Copy/rename to the expected library name.
-  final targetPath = outputDir.uri.resolve(libName);
+  // Keep the verified cache entry and copy it to the target-specific output.
+  final targetPath = input.outputDirectory.resolve(libName);
   final targetFile = File.fromUri(targetPath);
-  if (file.path != targetFile.path) {
-    await file.rename(targetFile.path);
-  }
+  await targetFile.parent.create(recursive: true);
+  await file.copy(targetFile.path);
 
   output.assets.code.add(
     CodeAsset(
@@ -178,6 +199,13 @@ Future<void> _downloadPrebuilt({
       file: targetPath,
     ),
   );
+}
+
+String? _binaryVariant(CodeConfig code) {
+  if (code.targetOS == OS.iOS && code.iOS.targetSdk == IOSSdk.iPhoneSimulator) {
+    return 'simulator';
+  }
+  return null;
 }
 
 // ──────────────────────────────────────────────
@@ -510,25 +538,34 @@ void _applyAndroidCCompilerConfig(
   final cargoTarget = _cargoTargetEnv(target);
   final compiler = cCompiler.compiler.toFilePath();
 
-  env['CC_$ccTarget'] = compiler;
-  env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
-  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
-
   final toolchainBin = File(compiler).parent.path;
   final clangPrefix = _androidClangPrefix(target);
-  final linker =
-      _findAndroidCompiler(
-        toolchainBin,
-        clangPrefix,
-        code.android.targetNdkApi,
-      ) ??
-      compiler;
-  env['CARGO_TARGET_${cargoTarget}_LINKER'] = linker;
+  final targetCompiler = _findAndroidCompiler(
+    toolchainBin,
+    clangPrefix,
+    code.android.targetNdkApi,
+  );
+  if (targetCompiler == null) {
+    throw BuildError(
+      message:
+          'Could not resolve the target-specific Android compiler for $target '
+          'from $toolchainBin.',
+    );
+  }
+
+  // The cc crate and Cargo must use the same target-aware compiler. A generic
+  // clang silently compiles C dependencies for the host architecture.
+  env['CC_$ccTarget'] = targetCompiler;
+  env['CXX_$ccTarget'] = _cxxFromCompiler(targetCompiler);
+  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = targetCompiler;
 }
 
 /// Derives a likely C++ compiler path from a C compiler path.
 String _cxxFromCompiler(String compiler) {
-  final cxx = '$compiler++';
+  final cxx = compiler.endsWith('-clang.cmd')
+      ? compiler.replaceFirst(RegExp(r'-clang\.cmd$'), '-clang++.cmd')
+      : '$compiler++';
   return File(cxx).existsSync() ? cxx : compiler;
 }
 
@@ -620,26 +657,28 @@ String? _findAndroidCompiler(
   String clangPrefix,
   int requestedApi,
 ) {
+  final suffix = Platform.isWindows ? '.cmd' : '';
   final candidates = <String>[
-    '$toolchainDir/$clangPrefix$requestedApi-clang',
-    '$toolchainDir/$clangPrefix-clang',
+    '$toolchainDir/$clangPrefix$requestedApi-clang$suffix',
+    '$toolchainDir/$clangPrefix-clang$suffix',
   ];
 
   // Find all versioned compilers and pick the highest API level as a fallback.
   final dir = Directory(toolchainDir);
   if (dir.existsSync()) {
-    final versioned = dir
-        .listSync()
-        .whereType<File>()
-        .map((f) => f.path)
-        .where(
-          (p) =>
-              p.startsWith('$toolchainDir/$clangPrefix') &&
-              p.endsWith('-clang') &&
-              p != '$toolchainDir/$clangPrefix-clang',
-        )
-        .toList();
-    versioned.sort();
+    final versioned =
+        dir
+            .listSync()
+            .whereType<File>()
+            .map((f) => f.path)
+            .where(
+              (p) =>
+                  p.startsWith('$toolchainDir/$clangPrefix') &&
+                  p.endsWith('-clang$suffix') &&
+                  p != '$toolchainDir/$clangPrefix-clang$suffix',
+            )
+            .toList()
+          ..sort((a, b) => _androidApiLevel(a).compareTo(_androidApiLevel(b)));
     candidates.addAll(versioned.reversed);
   }
 
@@ -647,6 +686,11 @@ String? _findAndroidCompiler(
     if (File(candidate).existsSync()) return candidate;
   }
   return null;
+}
+
+int _androidApiLevel(String compilerPath) {
+  final match = RegExp(r'(\d+)-clang(?:\.cmd)?$').firstMatch(compilerPath);
+  return int.tryParse(match?.group(1) ?? '') ?? -1;
 }
 
 /// Locates the Android NDK installation directory.
