@@ -260,6 +260,10 @@ Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
     _stripXcodeVars(env);
   }
 
+  // A bare cl.exe path is insufficient on Windows because INCLUDE, LIB and
+  // WindowsSdkDir are initialized together. Cargo/cc-rs discovers that full
+  // MSVC environment reliably, so do not override it with the partial config
+  // exposed by Flutter's Native Assets invocation.
   final cCompiler = code.cCompiler;
   if (code.targetOS == OS.android) {
     if (cCompiler != null) {
@@ -267,7 +271,7 @@ Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
     } else {
       _configureAndroid(env, code);
     }
-  } else if (cCompiler != null) {
+  } else if (cCompiler != null && code.targetOS != OS.windows) {
     _applyCCompilerConfig(env, code, cCompiler);
   }
 
