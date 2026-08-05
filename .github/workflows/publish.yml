@@ -247,7 +247,7 @@ jobs:
         run: |
           rm -rf .dart_tool example/cli/.dart_tool example/flutter_app/.dart_tool
           dart pub get
-          dart analyze --fatal-infos
+          dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
           (cd example/cli && dart pub get && dart analyze && dart run bin/main.dart --output="$RUNNER_TEMP/just_image.webp")
           test -s "$RUNNER_TEMP/just_image.webp"

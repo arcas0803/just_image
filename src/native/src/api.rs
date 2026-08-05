@@ -336,7 +336,7 @@ fn apply_operation(
 #[no_mangle]
 pub unsafe extern "C" fn rust_free_buffer(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len > 0 {
-        let _ = Box::from_raw(slice::from_raw_parts_mut(ptr, len));
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
     }
 }
 

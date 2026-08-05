@@ -48,7 +48,7 @@ jobs:
           dart format --output=none --set-exit-if-changed \
             lib test hook tool example/cli \
             example/flutter_app/lib example/flutter_app/test
-          dart analyze --fatal-infos
+          dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
 
       - name: Verify independent CLI
@@ -91,7 +91,7 @@ jobs:
       - name: Run Dart native integration tests
         run: |
           dart pub get
-          dart analyze --fatal-infos
+          dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
 
       - name: Run Flutter native smoke test
