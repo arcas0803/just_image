@@ -2,72 +2,64 @@ name: CI
 
 on:
   push:
-    branches: [main, v.2.0.0]
+    branches: [master, 'v.*']
   pull_request:
-    branches: [main]
-  workflow_dispatch:
+    branches: [master]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Reuse native objects between the package and both consumer examples.
-  CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target
+  CARGO_TARGET_DIR: ${{ runner.temp }}/just-image-cargo
 
 jobs:
-  verify:
-    name: Rust, Dart and Flutter consumers
+  quality:
+    name: Rust, Dart, Flutter and package
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-          targets: x86_64-unknown-linux-gnu
-
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: false
 
-      - name: Resolve package dependencies
+      - name: Resolve dependencies
         run: dart pub get
 
-      - name: Check Rust formatting and lints
+      - name: Check Rust
         working-directory: src/native
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
 
-      - name: Run Rust tests
-        working-directory: src/native
-        run: cargo test --locked
-
-      - name: Check Dart formatting and analysis
+      - name: Check Dart
         run: |
-          dart format --output=none --set-exit-if-changed lib test hook tool example/cli example/flutter_app/lib example/flutter_app/test
+          dart format --output=none --set-exit-if-changed \
+            lib test hook tool example/cli \
+            example/flutter_app/lib example/flutter_app/test
           dart analyze --fatal-infos
+          dart test --chain-stack-traces
 
-      - name: Run real Dart to Rust integration tests
-        run: dart test --chain-stack-traces
-
-      - name: Verify independent CLI consumer
+      - name: Verify independent CLI
         working-directory: example/cli
         run: |
           dart pub get
           dart analyze
-          dart run bin/main.dart --output=${{ runner.temp }}/just_image.webp
-          test -s ${{ runner.temp }}/just_image.webp
+          dart run bin/main.dart --output="${{ runner.temp }}/just_image.webp"
+          test -s "${{ runner.temp }}/just_image.webp"
 
-      - name: Verify independent Flutter consumer
+      - name: Verify independent Flutter app
         working-directory: example/flutter_app
         run: |
           flutter pub get
@@ -76,3 +68,35 @@ jobs:
 
       - name: Validate pub.dev package
         run: dart pub publish --dry-run
+
+  platforms:
+    name: Native consumer · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: false
+
+      - name: Run Dart native integration tests
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test --chain-stack-traces
+
+      - name: Run Flutter native smoke test
+        working-directory: example/flutter_app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test

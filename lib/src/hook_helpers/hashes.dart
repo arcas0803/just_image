@@ -7,7 +7,7 @@
 // commit the result.
 
 const String binaryVersion = '2.0.0';
-const String binaryReleaseTag = 'native-v$binaryVersion';
+const String binaryReleaseTag = 'v$binaryVersion';
 
 const Map<String, String> binaryHashes = {
   // macOS

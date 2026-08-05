@@ -1,4 +1,4 @@
-name: Publish to pub.dev
+name: Build native assets and publish
 
 on:
   push:
@@ -7,35 +7,271 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  publish:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
+  desktop:
+    name: ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            source: libjust_image_native.dylib
+            artifact: libjust_image_native-macos-arm64.dylib
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            source: libjust_image_native.dylib
+            artifact: libjust_image_native-macos-x64.dylib
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            source: just_image_native.dll
+            artifact: just_image_native-windows-x64.dll
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            source: just_image_native.dll
+            artifact: just_image_native-windows-arm64.dll
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '10.15'
     steps:
       - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          sdk: stable
+          targets: ${{ matrix.target }}
+      - name: Build
+        working-directory: src/native
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp "src/native/target/${{ matrix.target }}/release/${{ matrix.source }}" \
+            "release-assets/${{ matrix.artifact }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-assets/${{ matrix.artifact }}
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
 
-      - name: Verify version and native release
+  linux:
+    name: ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: libjust_image_native-linux-x64.so
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: libjust_image_native-linux-arm64.so
+    runs-on: ${{ matrix.os }}
+    container: ubuntu:20.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates curl git pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build and stage binary
+        working-directory: src/native
+        run: |
+          cargo build --locked --release --target ${{ matrix.target }}
+          mkdir -p ../../release-assets
+          cp "target/${{ matrix.target }}/release/libjust_image_native.so" \
+            "../../release-assets/${{ matrix.artifact }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-assets/${{ matrix.artifact }}
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
+
+  ios:
+    name: iOS ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arm64
+            os: macos-15
+            targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          - runner: x64
+            os: macos-15-intel
+            targets: x86_64-apple-ios
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - name: Build iOS binaries
+        working-directory: src/native
+        shell: bash
+        run: |
+          mkdir -p ../../release-assets
+          if [[ "${{ matrix.runner }}" == "arm64" ]]; then
+            cargo build --locked --release --target aarch64-apple-ios
+            cp target/aarch64-apple-ios/release/libjust_image_native.dylib \
+              ../../release-assets/libjust_image_native-ios-arm64.dylib
+            cargo build --locked --release --target aarch64-apple-ios-sim
+            cp target/aarch64-apple-ios-sim/release/libjust_image_native.dylib \
+              ../../release-assets/libjust_image_native-ios-simulator-arm64.dylib
+          else
+            cargo build --locked --release --target x86_64-apple-ios
+            cp target/x86_64-apple-ios/release/libjust_image_native.dylib \
+              ../../release-assets/libjust_image_native-ios-simulator-x64.dylib
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ matrix.runner }}
+          path: release-assets/*
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
+
+  android:
+    name: Android binaries
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+      - name: Build Android binaries
+        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          toolchain="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p release-assets
+          for spec in \
+            "aarch64-linux-android:aarch64-linux-android24-clang:arm64" \
+            "armv7-linux-androideabi:armv7a-linux-androideabi24-clang:arm" \
+            "x86_64-linux-android:x86_64-linux-android24-clang:x64"; do
+            IFS=: read -r target compiler arch <<< "$spec"
+            target_env=$(echo "$target" | tr '[:lower:]-' '[:upper:]_')
+            cc_env=$(echo "$target" | tr '-' '_')
+            env \
+              "CC_$cc_env=$toolchain/$compiler" \
+              "AR_$cc_env=$toolchain/llvm-ar" \
+              "CARGO_TARGET_${target_env}_LINKER=$toolchain/$compiler" \
+              cargo build --locked --release \
+                --manifest-path src/native/Cargo.toml --target "$target"
+            cp "src/native/target/$target/release/libjust_image_native.so" \
+              "release-assets/libjust_image_native-android-$arch.so"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: release-assets/*
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
+
+  publish:
+    name: Verify and publish package
+    needs: [desktop, linux, ios, android]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify versions
+        shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           package_version=$(sed -n 's/^version: //p' pubspec.yaml)
+          rust_version=$(sed -n 's/^version = "\(.*\)"/\1/p' src/native/Cargo.toml | head -1)
           test "$version" = "$package_version"
-          ! grep -q PENDING lib/src/hook_helpers/hashes.dart
-          gh release view "native-v$version" --json assets --jq '.assets[].name' > /tmp/native-assets.txt
-          test "$(grep -c just_image_native /tmp/native-assets.txt)" -eq 12
+          test "$version" = "$rust_version"
 
-      - name: Validate zero-configuration installation
+      - name: Generate native hashes and checksums
+        shell: bash
         run: |
+          dart pub get
+          dart run tool/generate_hashes.dart release-assets "${GITHUB_REF_NAME#v}"
+          sha256sum release-assets/* > release-assets/SHA256SUMS
+          ! grep -q PENDING lib/src/hook_helpers/hashes.dart
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add lib/src/hook_helpers/hashes.dart
+          git commit -m "chore: embed native hashes for $GITHUB_REF_NAME"
+
+      - name: Publish GitHub Release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --title "just_image $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+      - name: Validate zero-configuration consumers
+        shell: bash
+        run: |
+          rm -rf .dart_tool example/cli/.dart_tool example/flutter_app/.dart_tool
           dart pub get
           dart analyze --fatal-infos
           dart test --chain-stack-traces
+          (cd example/cli && dart pub get && dart analyze && dart run bin/main.dart --output="$RUNNER_TEMP/just_image.webp")
+          test -s "$RUNNER_TEMP/just_image.webp"
+          (cd example/flutter_app && flutter pub get && flutter analyze && flutter test)
           dart pub publish --dry-run
 
-      - name: Publish just_image
+      - name: Publish to pub.dev
         run: dart pub publish --force
+
+  cleanup:
+    name: Delete temporary artifacts
+    if: always()
+    needs: [desktop, linux, ios, android, publish]
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete artifacts from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[].id' | while read -r id; do
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            done
