@@ -9,7 +9,6 @@ void main() {
       expect(OutputFormat.jpeg.name, 'jpeg');
       expect(OutputFormat.png.name, 'png');
       expect(OutputFormat.webp.name, 'webp');
-      expect(OutputFormat.avif.name, 'avif');
       expect(OutputFormat.tiff.name, 'tiff');
       expect(OutputFormat.bmp.name, 'bmp');
     });
@@ -18,7 +17,6 @@ void main() {
       expect(OutputFormat.jpeg.defaultQuality, 90);
       expect(OutputFormat.png.defaultQuality, 100);
       expect(OutputFormat.webp.defaultQuality, 90);
-      expect(OutputFormat.avif.defaultQuality, 80);
     });
   });
 
@@ -37,7 +35,6 @@ void main() {
       expect(const JpegOutput().format, 'jpeg');
       expect(const PngOutput().format, 'png');
       expect(const WebpOutput().format, 'webp');
-      expect(const AvifOutput().format, 'avif');
       expect(const TiffOutput().format, 'tiff');
       expect(const BmpOutput().format, 'bmp');
     });
@@ -54,13 +51,18 @@ void main() {
       expect(ImageFormat.fromString('jpeg'), ImageFormat.jpeg);
       expect(ImageFormat.fromString('png'), ImageFormat.png);
       expect(ImageFormat.fromString('webp'), ImageFormat.webp);
-      expect(ImageFormat.fromString('avif'), ImageFormat.avif);
       expect(ImageFormat.fromString('tiff'), ImageFormat.tiff);
       expect(ImageFormat.fromString('bmp'), ImageFormat.bmp);
     });
 
-    test('fromString throws on unknown', () {
-      expect(() => ImageFormat.fromString('gif'), throwsArgumentError);
+    test('fromString rejects unsupported formats', () {
+      for (final format in ['avif', 'gif', 'heic']) {
+        expect(
+          () => ImageFormat.fromString(format),
+          throwsArgumentError,
+          reason: '$format must not be exposed as a supported format',
+        );
+      }
     });
   });
 
@@ -116,7 +118,7 @@ void main() {
           .hsl(hue: 30, saturation: 0.2, lightness: -0.1)
           .filter(ArtisticFilterName.vintage)
           .thumbnail(200, 200)
-          .encode(OutputFormat.avif, quality: 90)
+          .encode(OutputFormat.webp, quality: 90)
           .autoOrient(true)
           .preserveMetadata(true)
           .preserveIcc(true);
@@ -156,7 +158,7 @@ void main() {
     test('encode accepts legacy OutputConfig', () {
       final pipeline = ImagePipeline.bytes(
         Uint8List(10),
-      ).encode(const AvifOutput(quality: 80));
+      ).encode(const WebpOutput(quality: 80));
       expect(pipeline, isA<ImagePipeline>());
     });
 

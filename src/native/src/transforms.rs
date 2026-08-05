@@ -51,8 +51,8 @@ pub fn crop(img: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> Dyna
     )
 }
 
-/// Free-angle rotation in degrees. The canvas is expanded to fit the rotated
-/// image; empty corners are filled with transparent black.
+/// Free-angle rotation in degrees. The original canvas size is retained and
+/// empty corners are filled with transparent black.
 pub fn rotate(img: &DynamicImage, degrees: f64) -> DynamicImage {
     let deg_normalized = degrees.rem_euclid(360.0);
 

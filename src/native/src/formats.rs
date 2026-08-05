@@ -48,25 +48,6 @@ pub fn encode_to_format(
                 return Err("WebP encode error: encoder returned empty data".to_string());
             }
         }
-        OutputFormat::Avif => {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-
-            use rgb::FromSlice;
-            let pixels: &[rgb::RGBA8] = rgba.as_raw().as_rgba();
-            let img_ref = ravif::Img::new(pixels, w as usize, h as usize);
-
-            let encoder = ravif::Encoder::new()
-                .with_quality(quality as f32)
-                .with_speed(6)
-                .with_alpha_quality(quality as f32);
-
-            let result = encoder
-                .encode_rgba(img_ref)
-                .map_err(|e| format!("AVIF encode error: {e}"))?;
-
-            buffer = result.avif_file;
-        }
         OutputFormat::Tiff => {
             let mut cursor = Cursor::new(&mut buffer);
             let encoder = image::codecs::tiff::TiffEncoder::new(&mut cursor);
@@ -107,17 +88,12 @@ mod tests {
             OutputFormat::Jpeg,
             OutputFormat::Png,
             OutputFormat::Webp,
-            OutputFormat::Avif,
             OutputFormat::Tiff,
             OutputFormat::Bmp,
         ] {
             let encoded = encode_to_format(&test_image(), format, 85)
                 .unwrap_or_else(|error| panic!("{} failed: {error}", format.as_str()));
             assert!(!encoded.is_empty());
-            if format == OutputFormat::Avif {
-                assert_eq!(&encoded[4..8], b"ftyp");
-                continue;
-            }
             let decoded = decode_image(&encoded)
                 .unwrap_or_else(|error| panic!("{} failed to decode: {error}", format.as_str()));
             assert_eq!((decoded.width(), decoded.height()), (4, 3));

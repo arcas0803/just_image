@@ -74,7 +74,7 @@ class ImageDecodeException extends JustImageException {
 /// ```dart
 /// try {
 ///   final result = await ImagePipeline(bytes)
-///       .toFormat(ImageFormat.avif)
+///       .toFormat(ImageFormat.webp)
 ///       .quality(150) // out of range
 ///       .execute();
 /// } on ImageEncodeException catch (e) {

@@ -1,22 +1,34 @@
 # just_image
 
-High-performance image processing for Dart and Flutter, powered by a Rust FFI
+High-performance image processing for Dart and Flutter, powered by a Rust
 engine and Dart Native Assets.
 
-## Why just_image
+`just_image` works without package-specific platform configuration. Add the
+dependency and use the API: consumers do not install Rust, configure Cargo,
+edit Gradle or CMake files, add CocoaPods, or copy dynamic libraries.
 
-- JPEG, PNG, WebP, TIFF and BMP decoding and encoding.
-- AVIF encoding.
-- Resize, crop, rotate, flip and aspect-preserving thumbnails.
-- Blur, sharpen, Sobel edges, HSL, brightness and contrast.
-- Fifteen artistic filters, watermarks and BlurHash.
-- EXIF auto-orientation and JPEG EXIF/ICC preservation.
-- Immutable pipelines executed outside the UI isolate.
-- Verified prebuilt native binaries: consumers do not install Rust.
+## Features
 
-HEIC and Flutter Web are not supported. AVIF is currently an output format;
-AVIF input decoding is not included because it would require shipping libdav1d
-for every mobile and desktop target.
+- Decode and encode JPEG, PNG, WebP, TIFF and BMP.
+- Resize, crop, rotate, flip and create aspect-preserving thumbnails.
+- Blur, sharpen, Sobel edge detection, brightness, contrast and HSL changes.
+- Apply 15 built-in artistic filters.
+- Composite an image watermark with position and opacity.
+- Encode and decode BlurHash placeholders.
+- Read image dimensions without running a transformation pipeline.
+- Auto-orient from EXIF and preserve JPEG EXIF/ICC data.
+- Process batches concurrently while keeping per-image successes and errors.
+- Run CPU-heavy work in a background Dart isolate.
+- Download and verify the correct precompiled native binary automatically.
+
+## Requirements
+
+- Dart 3.10.8 or newer.
+- Flutter 3.38 or newer for Flutter applications.
+- The normal SDK/toolchain for the platform targeted by a Flutter app, such as
+  Xcode for iOS or the Android SDK for Android.
+- Network access to GitHub Releases on the first build. The verified binary is
+  cached for subsequent builds.
 
 ## Installation
 
@@ -25,20 +37,7 @@ dependencies:
   just_image: ^2.0.0
 ```
 
-That is the complete consumer configuration. `dart run`, `dart test`,
-`dart build` and Flutter builds automatically download, verify, cache and bundle
-the correct native asset. No Cargo, NDK variables, Gradle, CMake, CocoaPods or
-Xcode changes are required specifically for this package.
-
-The first build needs access to GitHub Releases. Later builds reuse the
-SHA-256-verified local cache.
-
-Requirements:
-
-- Dart 3.10.8 or newer.
-- Flutter 3.38 or newer for Flutter applications.
-- A normal platform toolchain when building a Flutter application, such as
-  Xcode for iOS or the Android SDK for Android.
+No additional consumer configuration is required.
 
 ## Quick start
 
@@ -56,50 +55,123 @@ Future<void> main() async {
       .run();
 
   await File('photo.webp').writeAsBytes(result.data);
+  print('${result.width}x${result.height} · ${result.sizeInBytes} bytes');
 }
 ```
 
-`run()` reads the source asynchronously and executes the CPU-heavy native
-pipeline in a background isolate.
+`ImagePipeline` is immutable: every operation returns a new pipeline. `run()`
+loads the source asynchronously and executes native processing in a background
+isolate.
 
-## Sources
+## Image sources
+
+Use raw bytes, `dart:io` files, `cross_file` files or an explicit source:
 
 ```dart
 ImagePipeline.bytes(imageBytes);
 ImagePipeline.file(File('photo.jpg'));
 ImagePipeline.xfile(xFile);
-ImagePipeline.fromSource(customSource);
+ImagePipeline.fromSource(BytesSource(imageBytes));
+ImagePipeline.fromSource(FileSource(File('photo.jpg')));
+ImagePipeline.fromSource(XFileSource(xFile));
 ```
 
-The same constructors are available through `.justImage` extensions on
-`Uint8List`, `File` and `XFile`.
+`Uint8List`, `File` and `XFile` also expose the `.justImage` extension.
 
-## Operations
+## Output formats
 
 ```dart
-final result = await ImagePipeline.bytes(imageBytes)
-    .crop(20, 20, 800, 600)
-    .rotate(90)
+pipeline.encode(OutputFormat.jpeg, quality: 90);
+pipeline.encode(OutputFormat.png);
+pipeline.encode(OutputFormat.webp, quality: 85);
+pipeline.encode(OutputFormat.tiff);
+pipeline.encode(OutputFormat.bmp);
+```
+
+| Format | Decode | Encode | Default quality |
+|---|:---:|:---:|---:|
+| JPEG | Yes | Yes | 90 |
+| PNG | Yes | Yes | 100 |
+| WebP | Yes | Yes | 90 |
+| TIFF | Yes | Yes | 100 |
+| BMP | Yes | Yes | 100 |
+
+The typed `JpegOutput`, `PngOutput`, `WebpOutput`, `TiffOutput` and `BmpOutput`
+classes remain available:
+
+```dart
+pipeline.encode(const WebpOutput(quality: 85));
+```
+
+Quality must be between 1 and 100. For PNG, a value below 100 enables an
+additional optimization pass; TIFF and BMP are lossless formats.
+
+## Transformations
+
+```dart
+final result = await imageBytes.justImage
+    .resize(1600, 900)          // Exact dimensions, Lanczos3.
+    .crop(100, 50, 1200, 700)  // x, y, width, height.
+    .rotate(12.5)               // Degrees; arbitrary angles are accepted.
     .flipHorizontal()
-    .blur(1.2)
-    .sharpen(0.6)
-    .brightness(0.05)
-    .contrast(0.1)
-    .hsl(hue: 8, saturation: 0.05, lightness: 0)
-    .thumbnail(400, 300)
+    .flipVertical()
+    .thumbnail(400, 300)        // Fits inside the box; preserves ratio.
     .encode(OutputFormat.jpeg, quality: 90)
     .run();
 ```
 
-Arguments are validated before crossing FFI. Invalid dimensions, ranges,
-qualities or concurrency values produce an immediate Dart error.
+Crop coordinates must remain inside the current image bounds. `resize()` uses
+the exact requested dimensions and can change the aspect ratio; `thumbnail()`
+does not upscale and preserves it.
 
-### Watermark
+## Effects and colour
 
 ```dart
-final result = await ImagePipeline.bytes(imageBytes)
+final result = await imageBytes.justImage
+    .blur(1.2)
+    .sharpen(0.7, 0.05)
+    .brightness(0.08) // -1.0 to 1.0.
+    .contrast(0.12)   // -1.0 to 1.0.
+    .hsl(
+      hue: 10,        // Rotation in degrees.
+      saturation: 0.1,
+      lightness: -0.05,
+    )
+    .encode(OutputFormat.png)
+    .run();
+```
+
+Saturation and lightness accept values from -1.0 to 1.0. Blur and sharpen
+values must be finite and non-negative.
+
+Sobel edge detection returns an opaque greyscale edge image:
+
+```dart
+final edges = await imageBytes.justImage
+    .sobel()
+    .encode(OutputFormat.png)
+    .run();
+```
+
+## Artistic filters
+
+```dart
+final result = await imageBytes.justImage
+    .filter(ArtisticFilterName.goldenHour)
+    .encode(OutputFormat.webp, quality: 90)
+    .run();
+```
+
+Available values are `vintage`, `sepia`, `cool`, `warm`, `marine`, `dramatic`,
+`lomo`, `retro`, `noir`, `bloom`, `polaroid`, `goldenHour`, `arctic`,
+`cinematic` and `fade`.
+
+## Watermarks
+
+```dart
+final result = await imageBytes.justImage
     .watermark(
-      BytesSource(watermarkBytes),
+      FileSource(File('logo.png')),
       x: 24,
       y: 24,
       opacity: 0.7,
@@ -108,10 +180,19 @@ final result = await ImagePipeline.bytes(imageBytes)
     .run();
 ```
 
-### BlurHash
+Opacity accepts 0.0 to 1.0. The watermark is clipped when it extends beyond the
+base image. A pipeline supports one watermark source; calling `watermark()`
+again replaces the source associated with all watermark operations.
+
+## BlurHash
 
 ```dart
-final hash = await JustImage.blurHashEncode(BytesSource(imageBytes));
+final hash = await JustImage.blurHashEncode(
+  BytesSource(imageBytes),
+  componentsX: 4,
+  componentsY: 3,
+);
+
 final placeholder = await JustImage.blurHashDecode(
   hash,
   width: 32,
@@ -119,92 +200,146 @@ final placeholder = await JustImage.blurHashDecode(
 );
 ```
 
-### Image information
+BlurHash components must be between 1 and 9. Decoding returns a PNG
+`ImageResult`.
+
+## Image information
 
 ```dart
 final info = await JustImage.info(FileSource(File('photo.jpg')));
-print('${info.width}×${info.height}');
+print('${info.width}x${info.height}');
 ```
 
-### Batch processing
+This decodes enough of the image to return its dimensions and reports invalid
+or unsupported input as `ImageDecodeException`.
+
+## Batch processing
 
 ```dart
 final pipelines = files
     .map(
-      (file) => ImagePipeline.file(file)
+      (file) => file.justImage
           .thumbnail(800, 800)
           .encode(OutputFormat.webp, quality: 85),
     )
     .toList();
 
 final batch = await JustImage.processBatch(pipelines, concurrency: 4);
-print('${batch.successCount} succeeded; ${batch.failureCount} failed');
+
+print('${batch.successCount} succeeded');
+print('${batch.failureCount} failed');
 
 for (var index = 0; index < batch.results.length; index++) {
-  final result = batch.results[index];
+  final image = batch.results[index];
   final error = batch.errors[index];
-  // Exactly one of result or error is non-null.
+  // Exactly one of image or error is non-null.
 }
 ```
 
-## Output formats
+Input order is preserved. A failure does not cancel the remaining images.
+Concurrency must be greater than zero and should be chosen according to the
+memory available to the application.
 
-| Format | Default quality | Input | Output |
-|---|---:|:---:|:---:|
-| JPEG | 90 | ✅ | ✅ |
-| PNG | 100 | ✅ | ✅ |
-| WebP | 90 | ✅ | ✅ |
-| AVIF | 80 | — | ✅ |
-| TIFF | 100 | ✅ | ✅ |
-| BMP | 100 | ✅ | ✅ |
+## Orientation, EXIF and colour profiles
 
-The legacy `JpegOutput`, `PngOutput`, `WebpOutput`, `AvifOutput`,
-`TiffOutput` and `BmpOutput` classes remain available for source compatibility.
+These options default to `true`:
 
-## Supported targets
+```dart
+final result = await imageBytes.justImage
+    .autoOrient(true)
+    .preserveMetadata(true)
+    .preserveIcc(true)
+    .encode(OutputFormat.jpeg)
+    .run();
+```
 
-| Platform | Architectures | Minimum |
-|---|---|---|
-| Android | arm64, arm32, x64 | API 24 |
-| iOS device | arm64 | iOS 13 |
-| iOS simulator | arm64, x64 | iOS 13 |
-| macOS | arm64, x64 | macOS 10.15 |
-| Windows | arm64, x64 | Windows 10 |
-| Linux glibc | arm64, x64 | Ubuntu 20.04 / compatible glibc 2.31 |
+EXIF orientation is applied when present. Raw EXIF and ICC reinjection is
+implemented for JPEG output. Other output formats retain processed pixels but
+do not currently receive the original metadata blocks.
 
-Support means that the release pipeline produces a dedicated binary and checks
-its integrity. Web, Fuchsia, musl/Alpine and 32-bit desktop targets are not part
-of the 2.0.0 support matrix.
+## Errors and validation
 
-## Error model
+Public arguments are validated before crossing FFI. Native panics are contained
+and converted into Dart errors. All package errors extend
+`JustImageException`:
 
-All engine errors extend `JustImageException`:
-
+- `EmptyInputException`
 - `ImageDecodeException`
 - `ImageEncodeException`
 - `PipelineExecutionException`
 - `NativeLibraryException`
 - `UnsupportedPlatformException`
-- `EmptyInputException`
 
-Batch operations capture per-item errors in `BatchResult` instead of aborting
-the complete batch.
+```dart
+try {
+  await File('input.jpg').justImage
+      .crop(0, 0, 10000, 10000)
+      .encode(OutputFormat.webp)
+      .run();
+} on ImageDecodeException catch (error) {
+  print('The input cannot be decoded: $error');
+} on PipelineExecutionException catch (error) {
+  print('An operation failed: $error');
+} on JustImageException catch (error) {
+  print('Image processing failed: $error');
+}
+```
+
+## Supported platforms
+
+Every published version provides a dedicated SHA-256-verified binary for each
+entry below.
+
+| Platform | Architectures | Minimum |
+|---|---|---|
+| Android | arm32, arm64, x64 | API 24 |
+| iOS device | arm64 | iOS 13 |
+| iOS simulator | arm64, x64 | iOS 13 |
+| macOS | arm64, x64 | macOS 10.15 |
+| Windows | arm64, x64 | Windows 10 |
+| Linux glibc | arm64, x64 | glibc 2.31 |
+
+## Limitations
+
+- AVIF, HEIC/HEIF, GIF, SVG, RAW camera formats and animated images are not
+  supported.
+- Flutter Web, Fuchsia, Alpine/musl and 32-bit desktop systems are not
+  supported.
+- Linux binaries target glibc 2.31 or newer; musl-based distributions need a
+  future dedicated build.
+- Processing is in memory. Large images and high batch concurrency can require
+  substantial RAM; there is no streaming/tiled decoder.
+- Output animation is not supported; every result is a single raster image.
+- Metadata preservation is limited to JPEG EXIF and ICC output blocks. GPS or
+  other sensitive EXIF data is preserved when `preserveMetadata(true)` is used.
+- Rotation by non-right angles keeps the original canvas size, can clip the
+  corners and introduces transparent pixels in newly exposed areas.
+- WebP quality 100 selects lossless encoding. PNG quality below 100 controls an
+  optimization pass rather than visual quality.
+- The first build requires access to the package's GitHub Releases. Offline
+  first-time installation is not supported.
 
 ## Examples
 
-- [`example/cli`](example/cli) is an independent Dart CLI consumer.
-- [`example/flutter_app`](example/flutter_app) is an independent Flutter
-  application with Android, iOS, Linux, macOS and Windows projects.
-- [`example/just_image_example.dart`](example/just_image_example.dart) shows the
-  complete API in a single script.
+- [`example/cli`](example/cli) is an independent Dart CLI project.
+- [`example/flutter_app`](example/flutter_app) is an independent Flutter app
+  with Android, iOS, Linux, macOS and Windows projects.
+- [`example/just_image_example.dart`](example/just_image_example.dart) contains
+  additional API examples.
 
-Both independent examples contain real native smoke tests and no package-
-specific platform configuration.
+Both independent projects consume `just_image` without platform-specific
+package configuration.
 
-## Developing just_image
+## Native binary delivery
 
-Consumers use prebuilt binaries. Maintainers can compile the Rust source by
-setting the package hook user define:
+Release automation compiles 12 native binaries, publishes them as immutable
+GitHub Release assets and embeds their SHA-256 hashes in the pub.dev package.
+The Native Assets build hook chooses the correct target, verifies the download,
+caches it by version and registers it with Dart or Flutter. Temporary GitHub
+Actions artifacts are retained for one day and deleted after publication.
+
+When developing this package itself, maintainers can opt into a local Cargo
+build with Native Assets user defines:
 
 ```yaml
 hooks:
@@ -214,18 +349,7 @@ hooks:
       debug_build: true
 ```
 
-Run the complete local verification with:
-
-```bash
-cargo test --manifest-path src/native/Cargo.toml --locked
-cargo clippy --manifest-path src/native/Cargo.toml --all-targets -- -D warnings
-dart analyze --fatal-infos
-dart test
-(cd example/cli && dart run bin/main.dart)
-(cd example/flutter_app && flutter test)
-```
-
-See [RELEASING.md](RELEASING.md) for the binary and pub.dev release process.
+Consumers should not add these settings.
 
 ## License
 

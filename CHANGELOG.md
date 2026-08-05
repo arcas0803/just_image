@@ -3,7 +3,8 @@
 ### Breaking changes
 
 - **Native Assets ABI**: FFI bindings are generated from a versioned C header and resolved using `@Native`; runtime loading no longer depends on the working directory.
-- **`OutputFormat` enum**: New `OutputFormat` enum (`jpeg`, `png`, `webp`, `avif`, `tiff`, `bmp`) replaces the need for `OutputConfig` subclasses in most cases. Use `pipeline.encode(OutputFormat.webp, quality: 85)`.
+- **`OutputFormat` enum**: New `OutputFormat` enum (`jpeg`, `png`, `webp`, `tiff`, `bmp`) replaces the need for `OutputConfig` subclasses in most cases. Use `pipeline.encode(OutputFormat.webp, quality: 85)`.
+- **AVIF removed**: AVIF input and output are not supported in 2.0.0. `OutputFormat.avif`, `ImageFormat.avif` and `AvifOutput` have been removed together with the native codec dependencies.
 - **`ImageResult.format`**: Changed from `String` to the new `ImageFormat` enum.
 - **Removed `ImagePipeline.runSync()`**: Use `run()` exclusively — it already runs in a background `Isolate`.
 - **`JustImage.processBatch`** now returns `BatchResult` instead of `List<ImageResult>`. `BatchResult` captures both successes and failures, allowing partial success handling.
@@ -43,7 +44,7 @@
 - Added real Dart-to-Rust integration tests for every output format, transforms, watermark, BlurHash and partial batch failures.
 - Added Rust unit tests for formats and native validation.
 - Added a 12-target native release workflow with one-day temporary artifact retention and automatic cleanup for GitHub Free.
-- Added a zero-configuration publish gate before pub.dev OIDC publishing.
+- Creating a version tag now builds and publishes every native binary, generates and validates SHA-256 hashes, tests the zero-configuration package and publishes to pub.dev without a manual preparation step.
 
 ## 1.0.8
 

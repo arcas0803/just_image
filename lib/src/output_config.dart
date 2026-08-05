@@ -16,9 +16,6 @@ enum OutputFormat {
   /// WebP format (lossy/lossless, default quality 90).
   webp(90),
 
-  /// AVIF format (high efficiency, default quality 80).
-  avif(80),
-
   /// TIFF format (lossless).
   tiff(100),
 
@@ -35,7 +32,6 @@ enum OutputFormat {
     OutputFormat.jpeg => 'jpeg',
     OutputFormat.png => 'png',
     OutputFormat.webp => 'webp',
-    OutputFormat.avif => 'avif',
     OutputFormat.tiff => 'tiff',
     OutputFormat.bmp => 'bmp',
   };
@@ -56,7 +52,7 @@ enum OutputFormat {
 sealed class OutputConfig {
   const OutputConfig();
 
-  /// Canonical format name sent to Rust (jpeg, png, webp, avif, tiff, bmp).
+  /// Canonical format name sent to Rust (jpeg, png, webp, tiff, bmp).
   String get format;
 
   /// Compression quality in the range [1, 100].
@@ -69,7 +65,6 @@ sealed class OutputConfig {
       OutputFormat.jpeg => JpegOutput(quality: q),
       OutputFormat.png => PngOutput(quality: q),
       OutputFormat.webp => WebpOutput(quality: q),
-      OutputFormat.avif => AvifOutput(quality: q),
       OutputFormat.tiff => TiffOutput(quality: q),
       OutputFormat.bmp => BmpOutput(quality: q),
     };
@@ -106,17 +101,6 @@ final class WebpOutput extends OutputConfig {
 
   @override
   String get format => 'webp';
-
-  @override
-  final int quality;
-}
-
-/// AVIF output configuration.
-final class AvifOutput extends OutputConfig {
-  const AvifOutput({this.quality = 80});
-
-  @override
-  String get format => 'avif';
 
   @override
   final int quality;

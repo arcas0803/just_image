@@ -5,7 +5,6 @@ enum ImageFormat {
   jpeg,
   png,
   webp,
-  avif,
   tiff,
   bmp;
 
@@ -14,7 +13,6 @@ enum ImageFormat {
     'jpeg' => ImageFormat.jpeg,
     'png' => ImageFormat.png,
     'webp' => ImageFormat.webp,
-    'avif' => ImageFormat.avif,
     'tiff' => ImageFormat.tiff,
     'bmp' => ImageFormat.bmp,
     _ => throw ArgumentError('Unknown image format: $name'),

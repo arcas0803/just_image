@@ -10,18 +10,17 @@ name = "just_image_native"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-image = { version = "0.25", features = ["jpeg", "png", "bmp", "tiff", "webp", "avif"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "tiff", "webp"] }
 rayon = "1.10"
 kamadak-exif = "0.5"
 oxipng = { version = "9", features = ["parallel"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 webp = "0.3"
-ravif = { version = "0.11", default-features = false, features = ["threading"] }
 rgb = "0.8"
 lcms2 = "6"
 fast_image_resize = { version = "4", features = ["image"] }
-imageproc = "0.25"
+imageproc = { version = "0.25", default-features = false, features = ["rayon"] }
 ab_glyph = "0.2"
 blurhash = "0.2"
 
@@ -41,4 +40,3 @@ debug = true
 
 [profile.release.build-override]
 opt-level = 3
-

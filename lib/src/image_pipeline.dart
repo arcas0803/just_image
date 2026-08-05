@@ -23,7 +23,7 @@ import 'output_config.dart';
 ///     .justImage
 ///     .resize(1920, 1080)
 ///     .sharpen(1.5)
-///     .encode(OutputFormat.avif, quality: 85)
+///     .encode(OutputFormat.webp, quality: 85)
 ///     .run();
 /// ```
 final class ImagePipeline {

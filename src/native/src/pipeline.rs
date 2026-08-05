@@ -109,7 +109,6 @@ pub enum OutputFormat {
     Jpeg,
     Png,
     Webp,
-    Avif,
     Tiff,
     Bmp,
 }
@@ -121,7 +120,6 @@ impl OutputFormat {
             Self::Jpeg => "jpeg",
             Self::Png => "png",
             Self::Webp => "webp",
-            Self::Avif => "avif",
             Self::Tiff => "tiff",
             Self::Bmp => "bmp",
         }

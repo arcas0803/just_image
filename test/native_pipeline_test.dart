@@ -30,15 +30,9 @@ void main() {
         expect(result.format.name, format.name);
         expect(result.data, isNotEmpty);
 
-        if (format == OutputFormat.avif) {
-          // The current native engine encodes AVIF but intentionally does not
-          // bundle libdav1d for decoding on every mobile/desktop target.
-          expect(String.fromCharCodes(result.data.sublist(4, 8)), 'ftyp');
-        } else {
-          final decoded = await JustImage.info(BytesSource(result.data));
-          expect(decoded.width, 4);
-          expect(decoded.height, 3);
-        }
+        final decoded = await JustImage.info(BytesSource(result.data));
+        expect(decoded.width, 4);
+        expect(decoded.height, 3);
       });
     }
 

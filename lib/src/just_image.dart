@@ -22,8 +22,10 @@ export 'image_result.dart' show ImageFormat;
 /// [File], [XFile] or [Uint8List].
 ///
 /// ```dart
-/// final hash = await JustImage.blurHashEncode(File('photo.jpg'));
-/// final info = await JustImage.info(xfile);
+/// final hash = await JustImage.blurHashEncode(
+///   FileSource(File('photo.jpg')),
+/// );
+/// final info = await JustImage.info(XFileSource(xfile));
 /// final results = await JustImage.processBatch([
 ///   file1.justImage.resize(100, 100).encode(const JpegOutput()),
 ///   file2.justImage.resize(100, 100).encode(const JpegOutput()),
