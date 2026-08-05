@@ -203,6 +203,12 @@ jobs:
         with:
           channel: stable
           cache: false
+      # setup-dart exchanges the GitHub OIDC identity for a short-lived
+      # pub.dev token. Installing Dart through Flutter alone does not perform
+      # that exchange and would leave `dart pub publish` waiting for login.
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
