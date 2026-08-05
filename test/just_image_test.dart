@@ -4,12 +4,37 @@ import 'package:just_image/just_image.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('OutputConfig', () {
+  group('OutputFormat', () {
     test('format strings are correct', () {
+      expect(OutputFormat.jpeg.name, 'jpeg');
+      expect(OutputFormat.png.name, 'png');
+      expect(OutputFormat.webp.name, 'webp');
+      expect(OutputFormat.tiff.name, 'tiff');
+      expect(OutputFormat.bmp.name, 'bmp');
+    });
+
+    test('default qualities are reasonable', () {
+      expect(OutputFormat.jpeg.defaultQuality, 90);
+      expect(OutputFormat.png.defaultQuality, 100);
+      expect(OutputFormat.webp.defaultQuality, 90);
+    });
+  });
+
+  group('OutputConfig', () {
+    test('from OutputFormat creates correct config', () {
+      final jpeg = OutputConfig.from(OutputFormat.jpeg);
+      expect(jpeg.format, 'jpeg');
+      expect(jpeg.quality, 90);
+
+      final webp = OutputConfig.from(OutputFormat.webp, 85);
+      expect(webp.format, 'webp');
+      expect(webp.quality, 85);
+    });
+
+    test('legacy sealed classes still work', () {
       expect(const JpegOutput().format, 'jpeg');
       expect(const PngOutput().format, 'png');
       expect(const WebpOutput().format, 'webp');
-      expect(const AvifOutput().format, 'avif');
       expect(const TiffOutput().format, 'tiff');
       expect(const BmpOutput().format, 'bmp');
     });
@@ -21,6 +46,26 @@ void main() {
     });
   });
 
+  group('ImageFormat', () {
+    test('fromString parses all formats', () {
+      expect(ImageFormat.fromString('jpeg'), ImageFormat.jpeg);
+      expect(ImageFormat.fromString('png'), ImageFormat.png);
+      expect(ImageFormat.fromString('webp'), ImageFormat.webp);
+      expect(ImageFormat.fromString('tiff'), ImageFormat.tiff);
+      expect(ImageFormat.fromString('bmp'), ImageFormat.bmp);
+    });
+
+    test('fromString rejects unsupported formats', () {
+      for (final format in ['avif', 'gif', 'heic']) {
+        expect(
+          () => ImageFormat.fromString(format),
+          throwsArgumentError,
+          reason: '$format must not be exposed as a supported format',
+        );
+      }
+    });
+  });
+
   group('ImageResult', () {
     test('sizeInBytes returns correct length', () {
       final data = Uint8List.fromList([1, 2, 3, 4, 5]);
@@ -28,7 +73,7 @@ void main() {
         data: data,
         width: 100,
         height: 100,
-        format: 'jpeg',
+        format: ImageFormat.jpeg,
       );
       expect(result.sizeInBytes, 5);
     });
@@ -38,21 +83,21 @@ void main() {
         data: Uint8List(0),
         width: 1920,
         height: 1080,
-        format: 'png',
+        format: ImageFormat.png,
       );
       expect(result.width, 1920);
       expect(result.height, 1080);
-      expect(result.format, 'png');
+      expect(result.format, ImageFormat.png);
     });
   });
 
   group('ImagePipeline', () {
-    test('builds correct config JSON', () {
+    test('builds a pipeline configuration', () {
       final pipeline = ImagePipeline.bytes(Uint8List(10))
           .resize(800, 600)
           .sharpen(1.5)
           .brightness(0.1)
-          .encode(const WebpOutput(quality: 85));
+          .encode(OutputFormat.webp, quality: 85);
 
       expect(pipeline, isA<ImagePipeline>());
     });
@@ -73,7 +118,7 @@ void main() {
           .hsl(hue: 30, saturation: 0.2, lightness: -0.1)
           .filter(ArtisticFilterName.vintage)
           .thumbnail(200, 200)
-          .encode(const AvifOutput(quality: 90))
+          .encode(OutputFormat.webp, quality: 90)
           .autoOrient(true)
           .preserveMetadata(true)
           .preserveIcc(true);
@@ -101,6 +146,27 @@ void main() {
     test('thumbnail is chainable', () {
       final pipeline = ImagePipeline.bytes(Uint8List(10)).thumbnail(150, 150);
       expect(pipeline, isA<ImagePipeline>());
+    });
+
+    test('encode accepts OutputFormat enum', () {
+      final pipeline = ImagePipeline.bytes(
+        Uint8List(10),
+      ).encode(OutputFormat.webp, quality: 75);
+      expect(pipeline, isA<ImagePipeline>());
+    });
+
+    test('encode accepts legacy OutputConfig', () {
+      final pipeline = ImagePipeline.bytes(
+        Uint8List(10),
+      ).encode(const WebpOutput(quality: 80));
+      expect(pipeline, isA<ImagePipeline>());
+    });
+
+    test('encode throws on invalid type', () {
+      expect(
+        () => ImagePipeline.bytes(Uint8List(10)).encode(42),
+        throwsArgumentError,
+      );
     });
   });
 

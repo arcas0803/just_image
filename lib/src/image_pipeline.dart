@@ -23,7 +23,7 @@ import 'output_config.dart';
 ///     .justImage
 ///     .resize(1920, 1080)
 ///     .sharpen(1.5)
-///     .encode(const AvifOutput(quality: 85))
+///     .encode(OutputFormat.webp, quality: 85)
 ///     .run();
 /// ```
 final class ImagePipeline {
@@ -52,24 +52,46 @@ final class ImagePipeline {
        _preserveIcc = preserveIcc ?? true;
 
   /// Creates a pipeline from raw image bytes.
-  factory ImagePipeline.bytes(Uint8List bytes) = _BytesImagePipeline;
+  ImagePipeline.bytes(Uint8List bytes) : this._(source: BytesSource(bytes));
 
   /// Creates a pipeline from a dart:io [File].
-  factory ImagePipeline.file(File file) = _FileImagePipeline;
+  ImagePipeline.file(File file) : this._(source: FileSource(file));
 
   /// Creates a pipeline from a cross_file [XFile].
-  factory ImagePipeline.xfile(XFile xfile) = _XFileImagePipeline;
+  ImagePipeline.xfile(XFile xfile) : this._(source: XFileSource(xfile));
 
   /// Creates a pipeline from any [ImageSource].
-  factory ImagePipeline.fromSource(ImageSource source) =>
-      ImagePipeline._(source: source);
+  const ImagePipeline.fromSource(ImageSource source)
+    : _source = source,
+      _operations = const [],
+      _watermarkSource = null,
+      _output = const JpegOutput(),
+      _autoOrient = true,
+      _preserveMetadata = true,
+      _preserveIcc = true;
 
   // ────────────────────────────────
   // Configuration
   // ────────────────────────────────
 
   /// Sets the output format and quality.
-  ImagePipeline encode(OutputConfig output) => _copyWith(output: output);
+  ///
+  /// Accepts either an [OutputFormat] enum or an [OutputConfig] instance:
+  /// ```dart
+  /// pipeline.encode(OutputFormat.webp, quality: 85);
+  /// pipeline.encode(const WebpOutput(quality: 85));
+  /// ```
+  ImagePipeline encode(Object output, {int? quality}) {
+    final config = switch (output) {
+      OutputConfig o => o,
+      OutputFormat f => OutputConfig.from(f, quality),
+      _ => throw ArgumentError(
+        'encode() expects OutputFormat or OutputConfig, got ${output.runtimeType}',
+      ),
+    };
+    _requireRange('quality', config.quality, 1, 100);
+    return _copyWith(output: config);
+  }
 
   /// Enables or disables automatic EXIF orientation.
   ImagePipeline autoOrient(bool enabled) => _copyWith(autoOrient: enabled);
@@ -86,21 +108,32 @@ final class ImagePipeline {
   // ────────────────────────────────
 
   /// Resizes the image using Lanczos3 interpolation.
-  ImagePipeline resize(int width, int height) =>
-      _addOperation({'type': 'resize', 'width': width, 'height': height});
+  ImagePipeline resize(int width, int height) {
+    _requirePositive('width', width);
+    _requirePositive('height', height);
+    return _addOperation({'type': 'resize', 'width': width, 'height': height});
+  }
 
   /// Rectangular crop starting at ([x], [y]) with size [width]×[height].
-  ImagePipeline crop(int x, int y, int width, int height) => _addOperation({
-    'type': 'crop',
-    'x': x,
-    'y': y,
-    'width': width,
-    'height': height,
-  });
+  ImagePipeline crop(int x, int y, int width, int height) {
+    _requireNonNegative('x', x);
+    _requireNonNegative('y', y);
+    _requirePositive('width', width);
+    _requirePositive('height', height);
+    return _addOperation({
+      'type': 'crop',
+      'x': x,
+      'y': y,
+      'width': width,
+      'height': height,
+    });
+  }
 
   /// Free-angle rotation in degrees.
-  ImagePipeline rotate(double degrees) =>
-      _addOperation({'type': 'rotate', 'degrees': degrees});
+  ImagePipeline rotate(double degrees) {
+    _requireFinite('degrees', degrees);
+    return _addOperation({'type': 'rotate', 'degrees': degrees});
+  }
 
   /// Flips the image horizontally.
   ImagePipeline flipHorizontal() => _addOperation({'type': 'flip_horizontal'});
@@ -113,39 +146,60 @@ final class ImagePipeline {
   // ────────────────────────────────
 
   /// Gaussian blur with the given [sigma] radius.
-  ImagePipeline blur(double sigma) =>
-      _addOperation({'type': 'blur', 'sigma': sigma});
+  ImagePipeline blur(double sigma) {
+    _requireFinite('sigma', sigma);
+    if (sigma < 0) {
+      throw RangeError.range(sigma, 0, null, 'sigma');
+    }
+    return _addOperation({'type': 'blur', 'sigma': sigma});
+  }
 
   /// Sharpens the image using an unsharp mask.
-  ImagePipeline sharpen(double amount, [double threshold = 0.0]) =>
-      _addOperation({
-        'type': 'sharpen',
-        'amount': amount,
-        'threshold': threshold,
-      });
+  ImagePipeline sharpen(double amount, [double threshold = 0.0]) {
+    _requireFinite('amount', amount);
+    _requireFinite('threshold', threshold);
+    if (amount < 0) throw RangeError.range(amount, 0, null, 'amount');
+    if (threshold < 0) {
+      throw RangeError.range(threshold, 0, null, 'threshold');
+    }
+    return _addOperation({
+      'type': 'sharpen',
+      'amount': amount,
+      'threshold': threshold,
+    });
+  }
 
   /// Sobel edge detection.
   ImagePipeline sobel() => _addOperation({'type': 'sobel'});
 
   /// Brightness adjustment in the range [-1.0, 1.0].
-  ImagePipeline brightness(double value) =>
-      _addOperation({'type': 'brightness', 'value': value});
+  ImagePipeline brightness(double value) {
+    _requireDoubleRange('value', value, -1, 1);
+    return _addOperation({'type': 'brightness', 'value': value});
+  }
 
   /// Contrast adjustment in the range [-1.0, 1.0].
-  ImagePipeline contrast(double value) =>
-      _addOperation({'type': 'contrast', 'value': value});
+  ImagePipeline contrast(double value) {
+    _requireDoubleRange('value', value, -1, 1);
+    return _addOperation({'type': 'contrast', 'value': value});
+  }
 
   /// HSL colour adjustment.
   ImagePipeline hsl({
     double hue = 0,
     double saturation = 0,
     double lightness = 0,
-  }) => _addOperation({
-    'type': 'hsl',
-    'hue': hue,
-    'saturation': saturation,
-    'lightness': lightness,
-  });
+  }) {
+    _requireFinite('hue', hue);
+    _requireDoubleRange('saturation', saturation, -1, 1);
+    _requireDoubleRange('lightness', lightness, -1, 1);
+    return _addOperation({
+      'type': 'hsl',
+      'hue': hue,
+      'saturation': saturation,
+      'lightness': lightness,
+    });
+  }
 
   /// Overlays a watermark image.
   ///
@@ -155,42 +209,40 @@ final class ImagePipeline {
     int x = 0,
     int y = 0,
     double opacity = 1.0,
-  }) => _copyWith(
-    watermarkSource: source,
-    operations: [
-      ..._operations,
-      {'type': 'watermark', 'x': x, 'y': y, 'opacity': opacity},
-    ],
-  );
+  }) {
+    _requireDoubleRange('opacity', opacity, 0, 1);
+    return _copyWith(
+      watermarkSource: source,
+      operations: [
+        ..._operations,
+        {'type': 'watermark', 'x': x, 'y': y, 'opacity': opacity},
+      ],
+    );
+  }
 
   /// Applies a named artistic filter.
   ImagePipeline filter(ArtisticFilterName filter) =>
       _addOperation({'type': 'filter', 'name': filter.jsonName});
 
   /// Generates a thumbnail that fits inside the given bounding box.
-  ImagePipeline thumbnail(int maxWidth, int maxHeight) => _addOperation({
-    'type': 'thumbnail',
-    'max_width': maxWidth,
-    'max_height': maxHeight,
-  });
+  ImagePipeline thumbnail(int maxWidth, int maxHeight) {
+    _requirePositive('maxWidth', maxWidth);
+    _requirePositive('maxHeight', maxHeight);
+    return _addOperation({
+      'type': 'thumbnail',
+      'max_width': maxWidth,
+      'max_height': maxHeight,
+    });
+  }
 
   // ────────────────────────────────
   // Execution
   // ────────────────────────────────
 
-  /// Executes the pipeline synchronously (blocks the current isolate).
-  ///
-  /// **Only use in isolates or CLI scripts.** For Flutter / UI code,
-  /// use [run] instead.
-  ImageResult runSync() {
-    final bridge = NativeBridge();
-    final response = _executeOnBridge(bridge);
-    return _toImageResult(response);
-  }
-
   /// Executes the pipeline in a background [Isolate].
   ///
-  /// This is the recommended way to run the pipeline.
+  /// This is the recommended way to run the pipeline. It never blocks the
+  /// event loop and is safe to use in Flutter / UI code.
   Future<ImageResult> run() async {
     final request = await _buildRequest();
     final response = await Isolate.run(() {
@@ -256,43 +308,6 @@ final class ImagePipeline {
     );
   }
 
-  PipelineResponse _executeOnBridge(NativeBridge bridge) {
-    final request = _buildRequestSync();
-    return bridge.processPipeline(request);
-  }
-
-  PipelineRequest _buildRequestSync() {
-    final bytes = switch (_source) {
-      BytesSource(:final bytes) => bytes,
-      _ => throw UnsupportedError(
-        'Synchronous execution requires an in-memory bytes source. '
-        'Use .run() for File/XFile sources.',
-      ),
-    };
-
-    if (bytes.isEmpty) {
-      throw const EmptyInputException();
-    }
-
-    Uint8List? watermarkBytes;
-    final watermarkSource = _watermarkSource;
-    if (watermarkSource != null) {
-      watermarkBytes = switch (watermarkSource) {
-        BytesSource(:final bytes) => bytes,
-        _ => throw UnsupportedError(
-          'Synchronous execution requires an in-memory bytes watermark.',
-        ),
-      };
-      if (watermarkBytes.isEmpty) watermarkBytes = null;
-    }
-
-    return PipelineRequest(
-      inputBytes: bytes,
-      configJson: _buildConfigJson(),
-      watermarkBytes: watermarkBytes,
-    );
-  }
-
   ImageResult _toImageResult(PipelineResponse response) {
     if (response.error != null) {
       throw _classifyNativeError(response.error!);
@@ -301,21 +316,34 @@ final class ImagePipeline {
       data: response.data,
       width: response.width,
       height: response.height,
-      format: _output.format,
+      format: ImageFormat.fromString(_output.format),
     );
   }
 }
 
-final class _BytesImagePipeline extends ImagePipeline {
-  _BytesImagePipeline(Uint8List bytes) : super._(source: BytesSource(bytes));
+void _requirePositive(String name, int value) {
+  if (value <= 0) throw RangeError.range(value, 1, null, name);
 }
 
-final class _FileImagePipeline extends ImagePipeline {
-  _FileImagePipeline(File file) : super._(source: FileSource(file));
+void _requireNonNegative(String name, int value) {
+  if (value < 0) throw RangeError.range(value, 0, null, name);
 }
 
-final class _XFileImagePipeline extends ImagePipeline {
-  _XFileImagePipeline(XFile xfile) : super._(source: XFileSource(xfile));
+void _requireRange(String name, int value, int min, int max) {
+  if (value < min || value > max) {
+    throw RangeError.range(value, min, max, name);
+  }
+}
+
+void _requireFinite(String name, double value) {
+  if (!value.isFinite) throw ArgumentError.value(value, name, 'must be finite');
+}
+
+void _requireDoubleRange(String name, double value, double min, double max) {
+  _requireFinite(name, value);
+  if (value < min || value > max) {
+    throw RangeError.value(value, name, 'must be between $min and $max');
+  }
 }
 
 JustImageException _classifyNativeError(String message) {

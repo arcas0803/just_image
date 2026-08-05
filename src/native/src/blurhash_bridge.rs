@@ -16,25 +16,15 @@ pub fn encode_blurhash(
     // blurhash::encode espera pixels como &[u8] en RGBA, 4 bytes por pixel
     let pixels = rgba.as_raw();
 
-    blurhash::encode(
-        components_x,
-        components_y,
-        w,
-        h,
-        pixels,
-    )
-    .map_err(|e| format!("BlurHash encode error: {e}"))
+    blurhash::encode(components_x, components_y, w, h, pixels)
+        .map_err(|e| format!("BlurHash encode error: {e}"))
 }
 
 /// Decodifica un hash BlurHash a una imagen RGBA.
 ///
 /// `width` y `height` son las dimensiones de la imagen de salida.
 /// Típicamente se usa con dimensiones pequeñas (32x32) para placeholders.
-pub fn decode_blurhash(
-    hash: &str,
-    width: u32,
-    height: u32,
-) -> Result<DynamicImage, String> {
+pub fn decode_blurhash(hash: &str, width: u32, height: u32) -> Result<DynamicImage, String> {
     let pixels = blurhash::decode(hash, width, height, 1.0)
         .map_err(|e| format!("BlurHash decode error: {e}"))?;
 

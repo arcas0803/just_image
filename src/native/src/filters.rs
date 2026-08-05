@@ -120,19 +120,16 @@ fn adjust_saturation(img: &DynamicImage, value: f32) -> DynamicImage {
 fn apply_gamma(img: &DynamicImage, gamma: f32) -> DynamicImage {
     let inv_gamma = 1.0 / gamma;
     let mut lut = [0u8; 256];
-    for i in 0..256 {
-        lut[i] = ((i as f32 / 255.0).powf(inv_gamma) * 255.0).clamp(0.0, 255.0) as u8;
+    for (i, item) in lut.iter_mut().enumerate() {
+        *item = ((i as f32 / 255.0).powf(inv_gamma) * 255.0).clamp(0.0, 255.0) as u8;
     }
-    map_rgb(img, |[r, g, b]| [lut[r as usize], lut[g as usize], lut[b as usize]])
+    map_rgb(img, |[r, g, b]| {
+        [lut[r as usize], lut[g as usize], lut[b as usize]]
+    })
 }
 
 /// Adjusts individual RGB channels, leaving alpha untouched.
-fn adjust_channels(
-    img: &DynamicImage,
-    r_mul: f32,
-    g_mul: f32,
-    b_mul: f32,
-) -> DynamicImage {
+fn adjust_channels(img: &DynamicImage, r_mul: f32, g_mul: f32, b_mul: f32) -> DynamicImage {
     map_rgb(img, |[r, g, b]| {
         [
             (r as f32 * r_mul).clamp(0.0, 255.0) as u8,

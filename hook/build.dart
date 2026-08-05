@@ -1,14 +1,19 @@
 // hook/build.dart — Native Assets build hook for just_image.
 //
-// This hook compiles the Rust crate located at src/native/ into a native
-// library and registers it as a native code asset. It supports dynamic
-// loading on desktop and mobile, and static linking when requested by the
-// invoker (e.g. Flutter iOS physical devices).
+// Compiles the Rust crate at src/native/ into a dynamic library and registers
+// it as a native code asset with DynamicLoadingBundled link mode on all
+// platforms (macOS, iOS, Linux, Windows, Android).
+//
+// StaticLinking is not yet supported by the Dart/Flutter SDK (see
+// https://github.com/dart-lang/sdk/issues/49418), so we always produce cdylib
+// and register DynamicLoadingBundled. This resolves the intermittent build
+// failures on iOS simulator, iOS device, and production builds.
 
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
+import 'package:just_image/src/hook_helpers/download.dart';
 
 const _baseName = 'just_image_native';
 
@@ -23,69 +28,189 @@ Future<void> main(List<String> args) async {
     final codeConfig = input.config.code;
 
     final targetTriple = _rustTarget(codeConfig);
-    final linkMode = _chooseLinkMode(codeConfig);
+    final linkMode = DynamicLoadingBundled();
     final libName = codeConfig.targetOS.libraryFileName(_baseName, linkMode);
 
-    final env = await _cargoEnv(codeConfig);
-    if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
-      final appleEnv = await _appleEnv(
-        codeConfig,
-        codeConfig.cCompiler,
-        input.outputDirectory,
-      );
-      env.addAll(appleEnv);
-    }
-
-    await _ensureRustTarget(targetTriple);
-
-    final cargoArgs = <String>[
-      'build',
-      '--release',
-      '--target',
-      targetTriple,
-      '--manifest-path',
-      crateDir.resolve('Cargo.toml').toFilePath(),
-    ];
-
-    final result = await Process.run(
-      'cargo',
-      cargoArgs,
-      workingDirectory: crateDir.toFilePath(),
-      environment: env,
+    // Released packages always prefer verified pre-built binaries, regardless
+    // of whether Cargo happens to be installed on the consumer machine.
+    // While developing a version whose hashes are still PENDING, local source
+    // compilation remains available automatically.
+    final variant = _binaryVariant(codeConfig);
+    final artifactName = binaryFileName(
+      codeConfig.targetOS.name,
+      codeConfig.targetArchitecture.name,
+      variant: variant,
     );
+    final requestedLocalBuild =
+        input.userDefines['local_build'] as bool? ?? false;
+    final localBuild = requestedLocalBuild || !hasPublishedBinary(artifactName);
 
-    if (result.exitCode != 0) {
-      throw Exception(
-        'Cargo build failed for $targetTriple (exit ${result.exitCode}):\n'
-        'stdout: ${result.stdout}\n'
-        'stderr: ${result.stderr}',
-      );
-    }
-
-    final libPath = crateDir.resolve('target/$targetTriple/release/$libName');
-    final libFile = File(libPath.toFilePath());
-    if (!libFile.existsSync()) {
-      throw Exception(
-        'Cargo build succeeded but expected output was not found:\n'
-        '  ${libPath.toFilePath()}',
-      );
-    }
-
-    output.assets.code.add(
-      CodeAsset(
-        package: input.packageName,
-        name: 'src/native/just_image_native',
+    if (localBuild) {
+      if (!await hasRustToolchain()) {
+        throw BuildError(
+          message:
+              'No pre-built just_image binary is published for $artifactName '
+              'and a Rust toolchain was not found. This package version is not '
+              'ready for zero-configuration installation on this target.',
+        );
+      }
+      await _compileWithCargo(
+        input: input,
+        output: output,
+        crateDir: crateDir,
+        codeConfig: codeConfig,
+        targetTriple: targetTriple,
         linkMode: linkMode,
-        file: libPath,
-      ),
-    );
-
-    output.dependencies.addAll([
-      crateDir.resolve('Cargo.toml'),
-      crateDir.resolve('src/'),
-    ]);
+        libName: libName,
+      );
+    } else {
+      await _downloadPrebuilt(
+        input: input,
+        output: output,
+        codeConfig: codeConfig,
+        linkMode: linkMode,
+        libName: libName,
+        variant: variant,
+      );
+    }
   });
 }
+
+/// Compiles the Rust crate with cargo (local build).
+Future<void> _compileWithCargo({
+  required BuildInput input,
+  required BuildOutputBuilder output,
+  required Uri crateDir,
+  required CodeConfig codeConfig,
+  required String targetTriple,
+  required LinkMode linkMode,
+  required String libName,
+}) async {
+  final env = await _cargoEnv(codeConfig);
+  if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
+    final appleEnv = await _appleEnv(
+      codeConfig,
+      codeConfig.cCompiler,
+      input.outputDirectory,
+    );
+    env.addAll(appleEnv);
+  }
+
+  await _ensureRustTarget(targetTriple);
+
+  // Check user-defines for debug builds.
+  final debugBuild = input.userDefines['debug_build'] as bool? ?? false;
+  final profileArgs = debugBuild ? ['--profile', 'dev'] : ['--release'];
+  final subdir = debugBuild ? 'debug' : 'release';
+
+  final cargoArgs = <String>[
+    'build',
+    ...profileArgs,
+    '--target',
+    targetTriple,
+    '--manifest-path',
+    crateDir.resolve('Cargo.toml').toFilePath(),
+  ];
+
+  final result = await Process.run(
+    'cargo',
+    cargoArgs,
+    workingDirectory: crateDir.toFilePath(),
+    environment: env,
+  );
+
+  if (result.exitCode != 0) {
+    throw BuildError(
+      message:
+          'Cargo build failed for $targetTriple (exit ${result.exitCode}):\n'
+          'stdout: ${result.stdout}\n'
+          'stderr: ${result.stderr}',
+    );
+  }
+
+  // Resolve the output library path, respecting CARGO_TARGET_DIR.
+  final cargoTargetDir = env['CARGO_TARGET_DIR'];
+  final targetBase = cargoTargetDir != null
+      ? Uri.directory('$cargoTargetDir/$targetTriple/$subdir/')
+      : crateDir.resolve('target/$targetTriple/$subdir/');
+  final libPath = targetBase.resolve(libName);
+  final libFile = File(libPath.toFilePath());
+  if (!libFile.existsSync()) {
+    throw BuildError(
+      message:
+          'Cargo build succeeded but expected output was not found:\n'
+          '  ${libPath.toFilePath()}\n'
+          'If CARGO_TARGET_DIR is set, ensure the path is correct.',
+    );
+  }
+
+  output.assets.code.add(
+    CodeAsset(
+      package: input.packageName,
+      name: 'src/native_bindings.g.dart',
+      linkMode: linkMode,
+      file: libPath,
+    ),
+  );
+
+  output.dependencies.addAll([
+    crateDir.resolve('Cargo.toml'),
+    crateDir.resolve('Cargo.lock'),
+    ...Directory.fromUri(crateDir.resolve('src/'))
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.rs'))
+        .map((file) => file.uri),
+    crateDir.resolve('include/just_image.h'),
+  ]);
+}
+
+/// Downloads a pre-built binary from GitHub releases (no Rust required).
+Future<void> _downloadPrebuilt({
+  required BuildInput input,
+  required BuildOutputBuilder output,
+  required CodeConfig codeConfig,
+  required LinkMode linkMode,
+  required String libName,
+  String? variant,
+}) async {
+  final osName = codeConfig.targetOS.name;
+  final archName = codeConfig.targetArchitecture.name;
+
+  final outputDir = Directory.fromUri(input.outputDirectoryShared);
+  final file = await downloadBinary(
+    os: osName,
+    arch: archName,
+    variant: variant,
+    outputDir: outputDir,
+  );
+
+  // Keep the verified cache entry and copy it to the target-specific output.
+  final targetPath = input.outputDirectory.resolve(libName);
+  final targetFile = File.fromUri(targetPath);
+  await targetFile.parent.create(recursive: true);
+  await file.copy(targetFile.path);
+
+  output.assets.code.add(
+    CodeAsset(
+      package: input.packageName,
+      name: 'src/native_bindings.g.dart',
+      linkMode: linkMode,
+      file: targetPath,
+    ),
+  );
+}
+
+String? _binaryVariant(CodeConfig code) {
+  if (code.targetOS == OS.iOS && code.iOS.targetSdk == IOSSdk.iPhoneSimulator) {
+    return 'simulator';
+  }
+  return null;
+}
+
+// ──────────────────────────────────────────────
+// Target triple mapping
+// ──────────────────────────────────────────────
 
 /// Maps the Dart/Native Assets target to a Rust target triple.
 String _rustTarget(CodeConfig code) {
@@ -96,7 +221,8 @@ String _rustTarget(CodeConfig code) {
     (OS.macOS, Architecture.arm64) => 'aarch64-apple-darwin',
     (OS.macOS, Architecture.x64) => 'x86_64-apple-darwin',
     (OS.iOS, Architecture.arm64) => _iosDeviceOrSimulator(code, isArm64: true),
-    (OS.iOS, Architecture.x64) => 'x86_64-apple-ios-sim',
+    // Rust's historical x64 simulator target omits the `-sim` suffix.
+    (OS.iOS, Architecture.x64) => 'x86_64-apple-ios',
     (OS.linux, Architecture.x64) => 'x86_64-unknown-linux-gnu',
     (OS.linux, Architecture.arm64) => 'aarch64-unknown-linux-gnu',
     (OS.windows, Architecture.x64) => 'x86_64-pc-windows-msvc',
@@ -104,7 +230,7 @@ String _rustTarget(CodeConfig code) {
     (OS.android, Architecture.arm64) => 'aarch64-linux-android',
     (OS.android, Architecture.arm) => 'armv7-linux-androideabi',
     (OS.android, Architecture.x64) => 'x86_64-linux-android',
-    _ => throw UnsupportedError('Unsupported target: $os $arch'),
+    _ => throw BuildError(message: 'Unsupported target: $os $arch'),
   };
 }
 
@@ -116,50 +242,36 @@ String _iosDeviceOrSimulator(CodeConfig code, {required bool isArm64}) {
   if (isArm64) {
     return isSimulator ? 'aarch64-apple-ios-sim' : 'aarch64-apple-ios';
   }
-  return 'x86_64-apple-ios-sim';
+  return 'x86_64-apple-ios';
 }
 
-/// Selects the link mode based on the invoker preference and target OS.
-LinkMode _chooseLinkMode(CodeConfig code) {
-  final preference = code.linkModePreference;
-  final prefersStatic =
-      preference == LinkModePreference.static ||
-      preference == LinkModePreference.preferStatic;
-
-  // iOS physical devices require static linking with Flutter. If the invoker
-  // prefers static, honor that for iOS.
-  if (code.targetOS == OS.iOS && prefersStatic) {
-    return StaticLinking();
-  }
-
-  if (preference == LinkModePreference.static) {
-    return StaticLinking();
-  }
-
-  return DynamicLoadingBundled();
-}
+// ──────────────────────────────────────────────
+// Cargo environment setup
+// ──────────────────────────────────────────────
 
 /// Builds the environment for cargo, stripping Xcode-injected variables that
-// conflict with Rust's cc crate and configuring cross-compilation toolchains.
+/// conflict with Rust's cc crate and configuring cross-compilation toolchains.
 Future<Map<String, String>> _cargoEnv(CodeConfig code) async {
   final env = Map<String, String>.from(Platform.environment);
-  final os = code.targetOS;
 
-  // Always strip Xcode / CocoaPods build-settings on Apple platforms.
-  if (os == OS.macOS || os == OS.iOS) {
+  // Always strip Xcode / CocoaPods build-settings on Apple platforms so the
+  // Rust cc crate uses a clean toolchain.
+  if (code.targetOS == OS.macOS || code.targetOS == OS.iOS) {
     _stripXcodeVars(env);
   }
 
+  // A bare cl.exe path is insufficient on Windows because INCLUDE, LIB and
+  // WindowsSdkDir are initialized together. Cargo/cc-rs discovers that full
+  // MSVC environment reliably, so do not override it with the partial config
+  // exposed by Flutter's Native Assets invocation.
   final cCompiler = code.cCompiler;
-  if (os == OS.android) {
-    // Native Assets can provide the Android NDK toolchain directly. Prefer it
-    // and only fall back to manual NDK discovery when it is absent.
+  if (code.targetOS == OS.android) {
     if (cCompiler != null) {
       _applyAndroidCCompilerConfig(env, code, cCompiler);
     } else {
       _configureAndroid(env, code);
     }
-  } else if (cCompiler != null) {
+  } else if (cCompiler != null && code.targetOS != OS.windows) {
     _applyCCompilerConfig(env, code, cCompiler);
   }
 
@@ -198,7 +310,6 @@ void _stripXcodeVars(Map<String, String> env) {
     'OTHER_SWIFT_FLAGS',
     'GCC_PREPROCESSOR_DEFINITIONS',
     'IPHONEOS_DEPLOYMENT_TARGET',
-    'SDKROOT',
     'TVOS_DEPLOYMENT_TARGET',
     'WATCHOS_DEPLOYMENT_TARGET',
     'ARCHS',
@@ -263,8 +374,8 @@ Future<void> _configureAppleTarget(
     arch = switch (code.targetArchitecture) {
       Architecture.arm64 => 'arm64',
       Architecture.x64 => 'x86_64',
-      _ => throw UnsupportedError(
-        'Unsupported iOS architecture: ${code.targetArchitecture}',
+      _ => throw BuildError(
+        message: 'Unsupported iOS architecture: ${code.targetArchitecture}',
       ),
     };
   } else if (os == OS.macOS) {
@@ -288,9 +399,10 @@ Future<void> _configureAppleTarget(
       cCompiler?.archiver.toFilePath() ?? await _xcrunToolPath(sdk, 'ar');
 
   if (compilerPath == null || archiverPath == null) {
-    throw Exception(
-      'Could not locate Apple toolchain for $sdk. '
-      'Ensure Xcode Command Line Tools are installed.',
+    throw BuildError(
+      message:
+          'Could not locate Apple toolchain for $sdk. '
+          'Ensure Xcode Command Line Tools are installed.',
     );
   }
 
@@ -338,6 +450,10 @@ exec "$compilerPath" $escapedFlags "\$@"
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = wrapperFile.path;
 }
 
+// ──────────────────────────────────────────────
+// xcrun helpers
+// ──────────────────────────────────────────────
+
 /// Runs `xcrun --sdk <sdk> --show-sdk-path` and returns the path.
 Future<String?> _xcrunSdkPath(String sdk) async {
   try {
@@ -349,8 +465,15 @@ Future<String?> _xcrunSdkPath(String sdk) async {
     if (result.exitCode == 0) {
       final path = result.stdout.toString().trim();
       if (path.isNotEmpty) return path;
+    } else {
+      stderr.writeln(
+        '[just_image] xcrun --sdk $sdk --show-sdk-path failed: '
+        '${result.stderr}',
+      );
     }
-  } catch (_) {}
+  } catch (e) {
+    stderr.writeln('[just_image] xcrun not available: $e');
+  }
   return null;
 }
 
@@ -361,10 +484,21 @@ Future<String?> _xcrunToolPath(String sdk, String tool) async {
     if (result.exitCode == 0) {
       final path = result.stdout.toString().trim();
       if (path.isNotEmpty) return path;
+    } else {
+      stderr.writeln(
+        '[just_image] xcrun --sdk $sdk --find $tool failed: '
+        '${result.stderr}',
+      );
     }
-  } catch (_) {}
+  } catch (e) {
+    stderr.writeln('[just_image] xcrun not available: $e');
+  }
   return null;
 }
+
+// ──────────────────────────────────────────────
+// C compiler config (non-Android)
+// ──────────────────────────────────────────────
 
 /// Applies the C compiler configuration provided by Native Assets.
 ///
@@ -384,6 +518,10 @@ void _applyCCompilerConfig(
   env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = cCompiler.linker.toFilePath();
 }
+
+// ──────────────────────────────────────────────
+// Android NDK
+// ──────────────────────────────────────────────
 
 /// Applies the C compiler configuration from Native Assets specifically for
 /// Android, where the NDK clang compiler doubles as the linker.
@@ -405,21 +543,34 @@ void _applyAndroidCCompilerConfig(
   final cargoTarget = _cargoTargetEnv(target);
   final compiler = cCompiler.compiler.toFilePath();
 
-  env['CC_$ccTarget'] = compiler;
-  env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
-  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
-
   final toolchainBin = File(compiler).parent.path;
   final clangPrefix = _androidClangPrefix(target);
-  final linker =
-      _findAndroidCompiler(toolchainBin, clangPrefix, code.android.targetNdkApi) ??
-      compiler;
-  env['CARGO_TARGET_${cargoTarget}_LINKER'] = linker;
+  final targetCompiler = _findAndroidCompiler(
+    toolchainBin,
+    clangPrefix,
+    code.android.targetNdkApi,
+  );
+  if (targetCompiler == null) {
+    throw BuildError(
+      message:
+          'Could not resolve the target-specific Android compiler for $target '
+          'from $toolchainBin.',
+    );
+  }
+
+  // The cc crate and Cargo must use the same target-aware compiler. A generic
+  // clang silently compiles C dependencies for the host architecture.
+  env['CC_$ccTarget'] = targetCompiler;
+  env['CXX_$ccTarget'] = _cxxFromCompiler(targetCompiler);
+  env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = targetCompiler;
 }
 
 /// Derives a likely C++ compiler path from a C compiler path.
 String _cxxFromCompiler(String compiler) {
-  final cxx = '$compiler++';
+  final cxx = compiler.endsWith('-clang.cmd')
+      ? compiler.replaceFirst(RegExp(r'-clang\.cmd$'), '-clang++.cmd')
+      : '$compiler++';
   return File(cxx).existsSync() ? cxx : compiler;
 }
 
@@ -431,19 +582,15 @@ String _ccTargetEnv(String rustTarget) =>
 String _cargoTargetEnv(String rustTarget) =>
     rustTarget.toUpperCase().replaceAll('-', '_');
 
-/// Configures Android NDK toolchain environment variables.
-///
-/// Picks an existing compiler for each Rust target, falling back from the
-/// requested NDK API level to the unversioned clang and finally to the
-/// highest available API level. This avoids failures when the installed NDK
-/// does not include a compiler for the exact API level requested by the
-/// build environment.
+/// Configures Android NDK toolchain environment variables for the current
+/// target only (not all targets, to avoid unnecessary env pollution).
 void _configureAndroid(Map<String, String> env, CodeConfig code) {
   final ndkHome = _findNdkHome();
   if (ndkHome == null) {
-    throw Exception(
-      'Android NDK not found. Set ANDROID_NDK_HOME to the NDK directory, '
-      'e.g. export ANDROID_NDK_HOME=\$HOME/Library/Android/sdk/ndk/28.2.13676358',
+    throw BuildError(
+      message:
+          'Android NDK not found. Set ANDROID_NDK_HOME to the NDK directory, '
+          'e.g. export ANDROID_NDK_HOME=\$HOME/Library/Android/sdk/ndk/28.2.13676358',
     );
   }
 
@@ -456,40 +603,36 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
   }
 
   if (!Directory(toolchain).existsSync()) {
-    throw Exception(
-      'Android NDK toolchain directory not found: $toolchain. '
-      'Ensure the NDK is installed and $hostTag is supported.',
+    throw BuildError(
+      message:
+          'Android NDK toolchain directory not found: $toolchain. '
+          'Ensure the NDK is installed and $hostTag is supported.',
     );
   }
 
   env['ANDROID_NDK_HOME'] = ndkHome;
 
-  const targets = [
-    ('aarch64-linux-android', 'aarch64-linux-android'),
-    ('armv7-linux-androideabi', 'armv7a-linux-androideabi'),
-    ('x86_64-linux-android', 'x86_64-linux-android'),
-  ];
+  final rustTarget = _rustTarget(code);
+  final clangPrefix = _androidClangPrefix(rustTarget);
+  final ccTarget = _ccTargetEnv(rustTarget);
+  final cargoTarget = _cargoTargetEnv(rustTarget);
 
-  for (final (rustTarget, clangPrefix) in targets) {
-    final ccTarget = _ccTargetEnv(rustTarget);
-    final cargoTarget = _cargoTargetEnv(rustTarget);
-
-    final compiler = _findAndroidCompiler(toolchain, clangPrefix, requestedApi);
-    if (compiler == null) {
-      throw Exception(
-        'Could not find an Android clang compiler for $rustTarget in '
-        '$toolchain. Tried $clangPrefix$requestedApi-clang, '
-        '$clangPrefix-clang, and $clangPrefix<api>-clang.',
-      );
-    }
-
-    env['CC_$ccTarget'] = compiler;
-    env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
-    env['AR_$ccTarget'] = _findAndroidAr(toolchain);
-    // The versioned clang script already has the correct --target and uses the
-    // NDK's own ld.lld, so no wrapper is needed on any platform.
-    env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+  final compiler = _findAndroidCompiler(toolchain, clangPrefix, requestedApi);
+  if (compiler == null) {
+    throw BuildError(
+      message:
+          'Could not find an Android clang compiler for $rustTarget in '
+          '$toolchain. Tried $clangPrefix$requestedApi-clang, '
+          '$clangPrefix-clang, and $clangPrefix<api>-clang.',
+    );
   }
+
+  env['CC_$ccTarget'] = compiler;
+  env['CXX_$ccTarget'] = _cxxFromCompiler(compiler);
+  env['AR_$ccTarget'] = _findAndroidAr(toolchain);
+  // The versioned clang script already has the correct --target and uses the
+  // NDK's own ld.lld, so no wrapper is needed on any platform.
+  env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
 }
 
 /// Maps a Rust Android target triple to the clang prefix used by the NDK.
@@ -505,7 +648,7 @@ String _findAndroidAr(String toolchain) {
   final llvmAr = '$toolchain/llvm-ar';
   if (File(llvmAr).existsSync()) return llvmAr;
   // Very old NDKs shipped a target-prefixed ar.
-  return 'llvm-ar';
+  return '$toolchain/llvm-ar';
 }
 
 /// Finds a working Android clang compiler in [toolchainDir] for [clangPrefix].
@@ -519,26 +662,28 @@ String? _findAndroidCompiler(
   String clangPrefix,
   int requestedApi,
 ) {
+  final suffix = Platform.isWindows ? '.cmd' : '';
   final candidates = <String>[
-    '$toolchainDir/$clangPrefix$requestedApi-clang',
-    '$toolchainDir/$clangPrefix-clang',
+    '$toolchainDir/$clangPrefix$requestedApi-clang$suffix',
+    '$toolchainDir/$clangPrefix-clang$suffix',
   ];
 
   // Find all versioned compilers and pick the highest API level as a fallback.
   final dir = Directory(toolchainDir);
   if (dir.existsSync()) {
-    final versioned = dir
-        .listSync()
-        .whereType<File>()
-        .map((f) => f.path)
-        .where(
-          (p) =>
-              p.startsWith('$toolchainDir/$clangPrefix') &&
-              p.endsWith('-clang') &&
-              p != '$toolchainDir/$clangPrefix-clang',
-        )
-        .toList();
-    versioned.sort();
+    final versioned =
+        dir
+            .listSync()
+            .whereType<File>()
+            .map((f) => f.path)
+            .where(
+              (p) =>
+                  p.startsWith('$toolchainDir/$clangPrefix') &&
+                  p.endsWith('-clang$suffix') &&
+                  p != '$toolchainDir/$clangPrefix-clang$suffix',
+            )
+            .toList()
+          ..sort((a, b) => _androidApiLevel(a).compareTo(_androidApiLevel(b)));
     candidates.addAll(versioned.reversed);
   }
 
@@ -546,6 +691,11 @@ String? _findAndroidCompiler(
     if (File(candidate).existsSync()) return candidate;
   }
   return null;
+}
+
+int _androidApiLevel(String compilerPath) {
+  final match = RegExp(r'(\d+)-clang(?:\.cmd)?$').firstMatch(compilerPath);
+  return int.tryParse(match?.group(1) ?? '') ?? -1;
 }
 
 /// Locates the Android NDK installation directory.
@@ -602,26 +752,35 @@ String _ndkHostTag() {
   return 'linux-x86_64';
 }
 
+// ──────────────────────────────────────────────
+// Rust target installation
+// ──────────────────────────────────────────────
+
 /// Ensures the given Rust target triple is installed via rustup.
+/// Uses a cache file to avoid repeated `rustup target list` calls.
 Future<void> _ensureRustTarget(String rustTarget) async {
+  // Quick check: does the target directory already exist?
+  // This implies the target was installed in a previous build.
   final listResult = await Process.run('rustup', [
     'target',
     'list',
     '--installed',
   ]);
   if (listResult.exitCode != 0) {
-    throw Exception(
-      'Failed to query installed Rust targets: ${listResult.stderr}',
+    throw BuildError(
+      message: 'Failed to query installed Rust targets: ${listResult.stderr}',
     );
   }
 
   final installed = listResult.stdout.toString().split('\n');
   if (installed.any((line) => line.trim() == rustTarget)) return;
 
+  stderr.writeln('[just_image] Installing Rust target $rustTarget...');
   final addResult = await Process.run('rustup', ['target', 'add', rustTarget]);
   if (addResult.exitCode != 0) {
-    throw Exception(
-      'Failed to install Rust target "$rustTarget": ${addResult.stderr}',
+    throw BuildError(
+      message:
+          'Failed to install Rust target "$rustTarget": ${addResult.stderr}',
     );
   }
 }

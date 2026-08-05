@@ -1,0 +1,11 @@
+name: just_image_cli_example
+description: Independent zero-configuration CLI consumer for just_image.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  just_image:
+    path: ../..

@@ -19,6 +19,7 @@ pubspec.lock
 
 # Flutter/Dart build output
 build/
+example/cli/thumbnail.webp
 
 # Agent tooling
 .agents/

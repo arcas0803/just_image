@@ -1,6 +1,5 @@
 /// Módulo de gestión de perfiles de color ICC.
 /// Usa lcms2 para conversiones de espacio de color con preservación de tonos.
-
 use rgb::RGBA;
 
 /// Aplica un perfil ICC al buffer de imagen si está disponible.
@@ -40,7 +39,15 @@ pub fn apply_icc_transform(
     }
 
     let src = pixels_as_rgba(pixels, pixel_count);
-    let mut dst: Vec<RGBA<u8>> = vec![RGBA { r: 0, g: 0, b: 0, a: 0 }; pixel_count];
+    let mut dst: Vec<RGBA<u8>> = vec![
+        RGBA {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0
+        };
+        pixel_count
+    ];
     transform.transform_pixels(&src, &mut dst);
     write_icc_result(pixels, &dst);
 

@@ -25,7 +25,12 @@ where
         .for_each(|(y, row)| {
             let off = y * row_stride;
             for i in (0..row.len()).step_by(4) {
-                let px = [src[off + i], src[off + i + 1], src[off + i + 2], src[off + i + 3]];
+                let px = [
+                    src[off + i],
+                    src[off + i + 1],
+                    src[off + i + 2],
+                    src[off + i + 3],
+                ];
                 let out = f(px);
                 row[i..i + 4].copy_from_slice(&out);
             }

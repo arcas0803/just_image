@@ -1,3 +1,7 @@
 src/native/target/
 example/images/
 example/output/
+example/cli/thumbnail.webp
+.agents/
+skills-lock.json
+tool/
