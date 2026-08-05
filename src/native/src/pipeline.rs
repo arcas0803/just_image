@@ -31,6 +31,77 @@ impl Default for PipelineConfig {
     }
 }
 
+impl PipelineConfig {
+    /// Validates values received over FFI before allocating image buffers.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=100).contains(&self.quality) {
+            return Err(format!(
+                "quality must be between 1 and 100, got {}",
+                self.quality
+            ));
+        }
+
+        for operation in &self.operations {
+            match operation {
+                Operation::Resize { width, height } | Operation::Crop { width, height, .. } => {
+                    require_dimensions(*width, *height)?;
+                }
+                Operation::Thumbnail {
+                    max_width,
+                    max_height,
+                } => require_dimensions(*max_width, *max_height)?,
+                Operation::GaussianBlur { sigma } if !sigma.is_finite() || *sigma < 0.0 => {
+                    return Err(format!(
+                        "sigma must be finite and non-negative, got {sigma}"
+                    ));
+                }
+                Operation::UnsharpMask { amount, threshold }
+                    if !amount.is_finite()
+                        || !threshold.is_finite()
+                        || *amount < 0.0
+                        || *threshold < 0.0 =>
+                {
+                    return Err(
+                        "sharpen amount and threshold must be finite and non-negative".into(),
+                    );
+                }
+                Operation::Brightness { value } | Operation::Contrast { value }
+                    if !(-1.0..=1.0).contains(value) =>
+                {
+                    return Err(format!("adjustment must be between -1 and 1, got {value}"));
+                }
+                Operation::HslAdjust {
+                    hue,
+                    saturation,
+                    lightness,
+                } if !hue.is_finite()
+                    || !(-1.0..=1.0).contains(saturation)
+                    || !(-1.0..=1.0).contains(lightness) =>
+                {
+                    return Err("invalid HSL adjustment".into());
+                }
+                Operation::Watermark { opacity, .. } if !(0.0..=1.0).contains(opacity) => {
+                    return Err(format!(
+                        "watermark opacity must be between 0 and 1, got {opacity}"
+                    ));
+                }
+                Operation::Rotate { degrees } if !degrees.is_finite() => {
+                    return Err("rotation must be finite".into());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+fn require_dimensions(width: u32, height: u32) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err(format!("dimensions must be positive, got {width}x{height}"));
+    }
+    Ok(())
+}
+
 /// Supported output image formats.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -128,7 +199,12 @@ pub enum Operation {
     #[serde(rename = "resize")]
     Resize { width: u32, height: u32 },
     #[serde(rename = "crop")]
-    Crop { x: u32, y: u32, width: u32, height: u32 },
+    Crop {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
     #[serde(rename = "rotate")]
     Rotate { degrees: f64 },
     #[serde(rename = "flip_horizontal")]
@@ -146,13 +222,13 @@ pub enum Operation {
     #[serde(rename = "contrast")]
     Contrast { value: f32 },
     #[serde(rename = "hsl")]
-    HslAdjust { hue: f32, saturation: f32, lightness: f32 },
-    #[serde(rename = "watermark")]
-    Watermark {
-        x: i32,
-        y: i32,
-        opacity: f32,
+    HslAdjust {
+        hue: f32,
+        saturation: f32,
+        lightness: f32,
     },
+    #[serde(rename = "watermark")]
+    Watermark { x: i32, y: i32, opacity: f32 },
     #[serde(rename = "filter")]
     Filter { name: ArtisticFilter },
     #[serde(rename = "thumbnail")]

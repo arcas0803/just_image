@@ -6,6 +6,7 @@
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::slice;
 
 use image::GenericImageView;
@@ -81,7 +82,7 @@ pub extern "C" fn rust_abi_version() -> u32 {
 
 #[derive(Debug)]
 enum NativeError {
-    InvalidInput(&'static str),
+    InvalidInput(String),
     Decode(String),
     Encode(String),
     Pipeline(String),
@@ -100,7 +101,7 @@ impl std::fmt::Display for NativeError {
 
 impl From<std::str::Utf8Error> for NativeError {
     fn from(_: std::str::Utf8Error) -> Self {
-        Self::InvalidInput("Invalid UTF-8 in input string")
+        Self::InvalidInput("Invalid UTF-8 in input string".to_string())
     }
 }
 
@@ -111,6 +112,17 @@ impl From<serde_json::Error> for NativeError {
 }
 
 type NativeResult<T> = Result<T, NativeError>;
+
+fn ffi_boundary<T, F>(operation: F) -> FfiResult
+where
+    T: Into<(Vec<u8>, u32, u32)>,
+    F: FnOnce() -> NativeResult<T>,
+{
+    match catch_unwind(AssertUnwindSafe(operation)) {
+        Ok(result) => to_ffi_result(result),
+        Err(_) => FfiResult::error("Native panic while processing the image"),
+    }
+}
 
 fn to_ffi_result<T>(result: NativeResult<T>) -> FfiResult
 where
@@ -149,13 +161,15 @@ pub unsafe extern "C" fn rust_process_pipeline(
     watermark_ptr: *const u8,
     watermark_len: usize,
 ) -> FfiResult {
-    to_ffi_result(process_pipeline(
-        input_ptr,
-        input_len,
-        config_json,
-        watermark_ptr,
-        watermark_len,
-    ))
+    ffi_boundary(|| {
+        process_pipeline(
+            input_ptr,
+            input_len,
+            config_json,
+            watermark_ptr,
+            watermark_len,
+        )
+    })
 }
 
 unsafe fn process_pipeline(
@@ -166,15 +180,18 @@ unsafe fn process_pipeline(
     watermark_len: usize,
 ) -> NativeResult<(Vec<u8>, u32, u32)> {
     if input_ptr.is_null() || input_len == 0 {
-        return Err(NativeError::InvalidInput("Null or empty input buffer"));
+        return Err(NativeError::InvalidInput(
+            "Null or empty input buffer".to_string(),
+        ));
     }
     if config_json.is_null() {
-        return Err(NativeError::InvalidInput("Null config JSON"));
+        return Err(NativeError::InvalidInput("Null config JSON".to_string()));
     }
 
     let input_data = slice::from_raw_parts(input_ptr, input_len);
     let config_str = CStr::from_ptr(config_json).to_str()?;
     let config: PipelineConfig = serde_json::from_str(config_str)?;
+    config.validate().map_err(NativeError::InvalidInput)?;
 
     run_pipeline(input_data, &config, watermark_ptr, watermark_len)
 }
@@ -257,7 +274,20 @@ fn apply_operation(
             y,
             width,
             height,
-        } => transforms::crop(img, *x, *y, *width, *height),
+        } => {
+            let right = x.checked_add(*width);
+            let bottom = y.checked_add(*height);
+            if right.is_none_or(|right| right > img.width())
+                || bottom.is_none_or(|bottom| bottom > img.height())
+            {
+                return Err(NativeError::Pipeline(format!(
+                    "Crop ({x}, {y}, {width}, {height}) exceeds image bounds {}x{}",
+                    img.width(),
+                    img.height()
+                )));
+            }
+            transforms::crop(img, *x, *y, *width, *height)
+        }
         Operation::Rotate { degrees } => transforms::rotate(img, *degrees),
         Operation::FlipHorizontal => transforms::flip_horizontal(img),
         Operation::FlipVertical => transforms::flip_vertical(img),
@@ -360,14 +390,15 @@ pub unsafe extern "C" fn rust_free_string(ptr: *mut c_char) {
 /// - `input_ptr` must point to `input_len` valid bytes.
 #[no_mangle]
 pub unsafe extern "C" fn rust_image_info(input_ptr: *const u8, input_len: usize) -> FfiResult {
-    to_ffi_result(image_info(input_ptr, input_len))
+    ffi_boundary(|| image_info(input_ptr, input_len))
 }
 
 unsafe fn image_info(input_ptr: *const u8, input_len: usize) -> NativeResult<(Vec<u8>, u32, u32)> {
     if input_ptr.is_null() || input_len == 0 {
-        return Err(NativeError::InvalidInput("Null or empty input buffer"));
+        return Err(NativeError::InvalidInput(
+            "Null or empty input buffer".to_string(),
+        ));
     }
-
     let input_data = slice::from_raw_parts(input_ptr, input_len);
     let img = formats::decode_image(input_data).map_err(NativeError::Decode)?;
     let (w, h) = img.dimensions();
@@ -391,12 +422,7 @@ pub unsafe extern "C" fn rust_blurhash_encode(
     components_x: u32,
     components_y: u32,
 ) -> FfiResult {
-    to_ffi_result(blurhash_encode(
-        input_ptr,
-        input_len,
-        components_x,
-        components_y,
-    ))
+    ffi_boundary(|| blurhash_encode(input_ptr, input_len, components_x, components_y))
 }
 
 unsafe fn blurhash_encode(
@@ -406,7 +432,14 @@ unsafe fn blurhash_encode(
     components_y: u32,
 ) -> NativeResult<(Vec<u8>, u32, u32)> {
     if input_ptr.is_null() || input_len == 0 {
-        return Err(NativeError::InvalidInput("Null or empty input buffer"));
+        return Err(NativeError::InvalidInput(
+            "Null or empty input buffer".to_string(),
+        ));
+    }
+    if !(1..=9).contains(&components_x) || !(1..=9).contains(&components_y) {
+        return Err(NativeError::InvalidInput(format!(
+            "BlurHash components must be between 1 and 9, got {components_x}x{components_y}"
+        )));
     }
 
     let input_data = slice::from_raw_parts(input_ptr, input_len);
@@ -427,7 +460,7 @@ pub unsafe extern "C" fn rust_blurhash_decode(
     width: u32,
     height: u32,
 ) -> FfiResult {
-    to_ffi_result(blurhash_decode(hash_ptr, width, height))
+    ffi_boundary(|| blurhash_decode(hash_ptr, width, height))
 }
 
 unsafe fn blurhash_decode(
@@ -436,7 +469,14 @@ unsafe fn blurhash_decode(
     height: u32,
 ) -> NativeResult<(Vec<u8>, u32, u32)> {
     if hash_ptr.is_null() {
-        return Err(NativeError::InvalidInput("Null BlurHash string"));
+        return Err(NativeError::InvalidInput(
+            "Null BlurHash string".to_string(),
+        ));
+    }
+    if width == 0 || height == 0 {
+        return Err(NativeError::InvalidInput(format!(
+            "BlurHash dimensions must be positive, got {width}x{height}"
+        )));
     }
 
     let hash_str = CStr::from_ptr(hash_ptr).to_str()?;
