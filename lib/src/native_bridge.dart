@@ -1,92 +1,13 @@
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'exceptions.dart';
+import 'native_bindings.g.dart' as native;
 
-// ──────────────────────────────────────────────
-// FFI struct mirrors for Rust types
-// ──────────────────────────────────────────────
-
-/// Mirrors the `FfiResult` struct defined in Rust.
-final class FfiResult extends Struct {
-  external Pointer<Uint8> data;
-
-  @IntPtr()
-  external int len;
-
-  @Uint32()
-  external int width;
-
-  @Uint32()
-  external int height;
-
-  external Pointer<Utf8> error;
-}
-
-// ──────────────────────────────────────────────
-// Native function typedefs
-// ──────────────────────────────────────────────
-
-typedef _RustProcessPipelineNative =
-    FfiResult Function(
-      Pointer<Uint8> inputPtr,
-      IntPtr inputLen,
-      Pointer<Utf8> configJson,
-      Pointer<Uint8> watermarkPtr,
-      IntPtr watermarkLen,
-    );
-typedef _RustProcessPipelineDart =
-    FfiResult Function(
-      Pointer<Uint8> inputPtr,
-      int inputLen,
-      Pointer<Utf8> configJson,
-      Pointer<Uint8> watermarkPtr,
-      int watermarkLen,
-    );
-
-typedef _RustFreeBufferNative = Void Function(Pointer<Uint8> ptr, IntPtr len);
-typedef _RustFreeBufferDart = void Function(Pointer<Uint8> ptr, int len);
-
-typedef _RustFreeErrorNative = Void Function(Pointer<Utf8> ptr);
-typedef _RustFreeErrorDart = void Function(Pointer<Utf8> ptr);
-
-typedef _RustVersionNative = Pointer<Utf8> Function();
-typedef _RustVersionDart = Pointer<Utf8> Function();
-
-typedef _RustFreeStringNative = Void Function(Pointer<Utf8> ptr);
-typedef _RustFreeStringDart = void Function(Pointer<Utf8> ptr);
-
-typedef _RustImageInfoNative =
-    FfiResult Function(Pointer<Uint8> inputPtr, IntPtr inputLen);
-typedef _RustImageInfoDart =
-    FfiResult Function(Pointer<Uint8> inputPtr, int inputLen);
-
-typedef _RustBlurHashEncodeNative =
-    FfiResult Function(
-      Pointer<Uint8> inputPtr,
-      IntPtr inputLen,
-      Uint32 componentsX,
-      Uint32 componentsY,
-    );
-typedef _RustBlurHashEncodeDart =
-    FfiResult Function(
-      Pointer<Uint8> inputPtr,
-      int inputLen,
-      int componentsX,
-      int componentsY,
-    );
-
-typedef _RustBlurHashDecodeNative =
-    FfiResult Function(Pointer<Utf8> hashPtr, Uint32 width, Uint32 height);
-typedef _RustBlurHashDecodeDart =
-    FfiResult Function(Pointer<Utf8> hashPtr, int width, int height);
-
-typedef _RustAvailableFiltersNative = Pointer<Utf8> Function();
-typedef _RustAvailableFiltersDart = Pointer<Utf8> Function();
+const _supportedAbiVersion = 1;
 
 // ──────────────────────────────────────────────
 // Data transferred across Isolate boundaries
@@ -130,28 +51,21 @@ final class PipelineResponse {
 /// high-level [ImagePipeline] and [JustImage] API instead.
 class NativeBridge {
   static NativeBridge? _instance;
-  late final DynamicLibrary _lib;
-
-  late final _RustProcessPipelineDart _processPipeline;
-  late final _RustFreeBufferDart _freeBuffer;
-  late final _RustFreeErrorDart _freeError;
-  late final _RustVersionDart _version;
-  late final _RustFreeStringDart _freeString;
-  late final _RustImageInfoDart _imageInfo;
-  late final _RustBlurHashEncodeDart _blurHashEncode;
-  late final _RustBlurHashDecodeDart _blurHashDecode;
-  late final _RustAvailableFiltersDart _availableFilters;
 
   NativeBridge._() {
     try {
-      _lib = _loadLibrary();
-      _bindFunctions();
-    } on UnsupportedPlatformException {
-      rethrow;
-    } on JustImageException {
+      final actualAbi = native.rust_abi_version();
+      if (actualAbi != _supportedAbiVersion) {
+        throw NativeLibraryException(
+          'Unsupported native ABI $actualAbi; expected $_supportedAbiVersion.',
+        );
+      }
+    } on NativeLibraryException {
       rethrow;
     } catch (e) {
-      throw NativeLibraryException('Failed to load native library: $e');
+      throw NativeLibraryException(
+        'Failed to resolve the bundled just_image native asset: $e',
+      );
     }
   }
 
@@ -161,144 +75,19 @@ class NativeBridge {
     return _instance!;
   }
 
-  /// Loads the native library for the current platform.
-  static DynamicLibrary _loadLibrary() {
-    const baseName = 'just_image_native';
-
-    if (Platform.isIOS) {
-      return DynamicLibrary.process();
-    }
-
-    final libName = _platformLibName(baseName);
-
-    // 1. Native Assets registered library (used by Flutter builds).
-    try {
-      return DynamicLibrary.open(libName);
-    } catch (_) {}
-
-    // 2. macOS framework bundle layout used by Flutter.
-    if (Platform.isMacOS) {
-      try {
-        return DynamicLibrary.open('$baseName.framework/$baseName');
-      } catch (_) {}
-    }
-
-    // 3. Native Assets JIT copy in .dart_tool/lib (produced by dart run).
-    try {
-      final nativeAssetsCopy =
-          '${Directory.current.path}/.dart_tool/lib/$libName';
-      return DynamicLibrary.open(nativeAssetsCopy);
-    } catch (_) {}
-
-    final hostTriple = _hostRustTarget();
-
-    // 4. Cargo host-target build when running from the package root.
-    if (hostTriple != null) {
-      try {
-        final cargoHostPath =
-            '${Directory.current.path}/src/native/target/$hostTriple/release/$libName';
-        return DynamicLibrary.open(cargoHostPath);
-      } catch (_) {}
-    }
-
-    // 5. Cargo default target directory (no --target).
-    try {
-      final cargoDefaultPath =
-          '${Directory.current.path}/src/native/target/release/$libName';
-      return DynamicLibrary.open(cargoDefaultPath);
-    } catch (_) {}
-
-    // 6. Cargo target directory with explicit host triple.
-    if (hostTriple != null) {
-      try {
-        final targetPath =
-            '${Directory.current.path}/src/native/target/$hostTriple/release/$libName';
-        return DynamicLibrary.open(targetPath);
-      } catch (_) {}
-    }
-
-    // 7. Legacy fallback.
-    try {
-      final legacyPath =
-          '${Directory.current.path}/native/target/release/$libName';
-      return DynamicLibrary.open(legacyPath);
-    } catch (_) {}
-
-    throw NativeLibraryException(
-      'Could not load $libName. '
-      'Ensure Rust is compiled: cd src/native && cargo build --release',
-    );
-  }
-
-  static String _platformLibName(String baseName) {
-    if (Platform.isAndroid || Platform.isLinux) return 'lib$baseName.so';
-    if (Platform.isMacOS) return 'lib$baseName.dylib';
-    if (Platform.isWindows) return '$baseName.dll';
-    throw UnsupportedPlatformException(Platform.operatingSystem);
-  }
-
-  /// Best-effort guess of the Rust target triple for the current host.
-  static String? _hostRustTarget() {
-    return switch (Abi.current()) {
-      Abi.macosArm64 => 'aarch64-apple-darwin',
-      Abi.macosX64 => 'x86_64-apple-darwin',
-      Abi.linuxX64 => 'x86_64-unknown-linux-gnu',
-      Abi.linuxArm64 => 'aarch64-unknown-linux-gnu',
-      Abi.windowsX64 => 'x86_64-pc-windows-msvc',
-      Abi.windowsArm64 => 'aarch64-pc-windows-msvc',
-      _ => null,
-    };
-  }
-
-  void _bindFunctions() {
-    _processPipeline = _lib
-        .lookupFunction<_RustProcessPipelineNative, _RustProcessPipelineDart>(
-          'rust_process_pipeline',
-        );
-    _freeBuffer = _lib
-        .lookupFunction<_RustFreeBufferNative, _RustFreeBufferDart>(
-          'rust_free_buffer',
-        );
-    _freeError = _lib.lookupFunction<_RustFreeErrorNative, _RustFreeErrorDart>(
-      'rust_free_error',
-    );
-    _version = _lib.lookupFunction<_RustVersionNative, _RustVersionDart>(
-      'rust_version',
-    );
-    _freeString = _lib
-        .lookupFunction<_RustFreeStringNative, _RustFreeStringDart>(
-          'rust_free_string',
-        );
-    _imageInfo = _lib.lookupFunction<_RustImageInfoNative, _RustImageInfoDart>(
-      'rust_image_info',
-    );
-    _blurHashEncode = _lib
-        .lookupFunction<_RustBlurHashEncodeNative, _RustBlurHashEncodeDart>(
-          'rust_blurhash_encode',
-        );
-    _blurHashDecode = _lib
-        .lookupFunction<_RustBlurHashDecodeNative, _RustBlurHashDecodeDart>(
-          'rust_blurhash_decode',
-        );
-    _availableFilters = _lib
-        .lookupFunction<_RustAvailableFiltersNative, _RustAvailableFiltersDart>(
-          'rust_available_filters',
-        );
-  }
-
   /// Version string reported by the Rust native library.
   String get nativeVersion {
-    final ptr = _version();
-    final version = ptr.toDartString();
-    _freeString(ptr);
+    final ptr = native.rust_version();
+    final version = ptr.cast<Utf8>().toDartString();
+    native.rust_free_string(ptr);
     return version;
   }
 
   /// List of available artistic filter names.
   List<String> get availableFilters {
-    final ptr = _availableFilters();
-    final jsonStr = ptr.toDartString();
-    _freeString(ptr);
+    final ptr = native.rust_available_filters();
+    final jsonStr = ptr.cast<Utf8>().toDartString();
+    native.rust_free_string(ptr);
     return (jsonDecode(jsonStr) as List).cast<String>();
   }
 
@@ -323,10 +112,10 @@ class NativeBridge {
             .setAll(0, request.watermarkBytes!);
       }
 
-      final result = _processPipeline(
+      final result = native.rust_process_pipeline(
         inputPtr,
         request.inputBytes.length,
-        configPtr.cast<Utf8>(),
+        configPtr.cast<Char>(),
         watermarkPtr,
         watermarkLen,
       );
@@ -341,7 +130,7 @@ class NativeBridge {
       final inputPtr = arena<Uint8>(bytes.length);
       inputPtr.asTypedList(bytes.length).setAll(0, bytes);
 
-      final result = _imageInfo(inputPtr, bytes.length);
+      final result = native.rust_image_info(inputPtr, bytes.length);
       return _unwrapFfiResult(result);
     });
   }
@@ -356,7 +145,7 @@ class NativeBridge {
       final inputPtr = arena<Uint8>(bytes.length);
       inputPtr.asTypedList(bytes.length).setAll(0, bytes);
 
-      final result = _blurHashEncode(
+      final result = native.rust_blurhash_encode(
         inputPtr,
         bytes.length,
         componentsX,
@@ -370,19 +159,23 @@ class NativeBridge {
   PipelineResponse blurHashDecode(String hash, int width, int height) {
     return using((arena) {
       final hashPtr = hash.toNativeUtf8(allocator: arena);
-      final result = _blurHashDecode(hashPtr.cast<Utf8>(), width, height);
+      final result = native.rust_blurhash_decode(
+        hashPtr.cast<Char>(),
+        width,
+        height,
+      );
       return _unwrapFfiResult(result);
     });
   }
 
   /// Converts a Rust [FfiResult] into a Dart [PipelineResponse], freeing
   /// native memory in the process.
-  PipelineResponse _unwrapFfiResult(FfiResult result) {
+  PipelineResponse _unwrapFfiResult(native.FfiResult result) {
     if (result.error != nullptr) {
-      final errorMsg = result.error.toDartString();
-      _freeError(result.error);
+      final errorMsg = result.error.cast<Utf8>().toDartString();
+      native.rust_free_error(result.error);
       if (result.data != nullptr) {
-        _freeBuffer(result.data, result.len);
+        native.rust_free_buffer(result.data, result.len);
       }
       return PipelineResponse(
         data: Uint8List(0),
@@ -396,7 +189,7 @@ class NativeBridge {
     if (result.len > 0 && result.data != nullptr) {
       outputData.setAll(0, result.data.asTypedList(result.len));
     }
-    _freeBuffer(result.data, result.len);
+    native.rust_free_buffer(result.data, result.len);
 
     return PipelineResponse(
       data: outputData,

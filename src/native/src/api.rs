@@ -21,6 +21,9 @@ use crate::thumbnail;
 use crate::transforms;
 use crate::watermark;
 
+/// ABI version shared with the generated Dart bindings.
+pub const ABI_VERSION: u32 = 1;
+
 // ──────────────────────────────────────────────
 // FFI result struct
 // ──────────────────────────────────────────────
@@ -55,8 +58,7 @@ impl FfiResult {
     }
 
     fn error(msg: &str) -> Self {
-        let c_msg = CString::new(msg)
-            .unwrap_or_else(|_| CString::new("Unknown error").unwrap());
+        let c_msg = CString::new(msg).unwrap_or_else(|_| CString::new("Unknown error").unwrap());
         Self {
             data: std::ptr::null_mut(),
             len: 0,
@@ -65,6 +67,12 @@ impl FfiResult {
             error: c_msg.into_raw(),
         }
     }
+}
+
+/// Returns the ABI version implemented by this native library.
+#[no_mangle]
+pub extern "C" fn rust_abi_version() -> u32 {
+    ABI_VERSION
 }
 
 // ──────────────────────────────────────────────
@@ -215,11 +223,21 @@ fn run_pipeline(
     let mut encoded = formats::encode_to_format(&img, config.output_format, config.quality)
         .map_err(NativeError::Encode)?;
 
-    if config.preserve_metadata && config.output_format == OutputFormat::Jpeg {
+    if config.output_format == OutputFormat::Jpeg
+        && (config.preserve_metadata || config.preserve_icc)
+    {
         encoded = metadata::inject_metadata_jpeg(
             &encoded,
-            meta.exif_data.as_deref(),
-            meta.icc_profile.as_deref(),
+            if config.preserve_metadata {
+                meta.exif_data.as_deref()
+            } else {
+                None
+            },
+            if config.preserve_icc {
+                meta.icc_profile.as_deref()
+            } else {
+                None
+            },
         );
     }
 
@@ -265,8 +283,9 @@ fn apply_operation(
             watermark::apply_watermark(img, wm_data, *x, *y, *opacity)
                 .map_err(NativeError::Pipeline)?
         }
-        Operation::Filter { name } => filters::apply_filter(img, *name)
-            .map_err(NativeError::Pipeline)?,
+        Operation::Filter { name } => {
+            filters::apply_filter(img, *name).map_err(NativeError::Pipeline)?
+        }
         Operation::Thumbnail {
             max_width,
             max_height,
@@ -307,6 +326,7 @@ pub unsafe extern "C" fn rust_free_error(ptr: *mut c_char) {
 /// # Safety
 /// - `result` must be a valid `FfiResult` obtained from `rust_process_pipeline`.
 #[no_mangle]
+#[allow(dead_code)]
 pub unsafe extern "C" fn rust_free_result(result: FfiResult) {
     rust_free_buffer(result.data, result.len);
     rust_free_error(result.error);
@@ -339,17 +359,11 @@ pub unsafe extern "C" fn rust_free_string(ptr: *mut c_char) {
 /// # Safety
 /// - `input_ptr` must point to `input_len` valid bytes.
 #[no_mangle]
-pub unsafe extern "C" fn rust_image_info(
-    input_ptr: *const u8,
-    input_len: usize,
-) -> FfiResult {
+pub unsafe extern "C" fn rust_image_info(input_ptr: *const u8, input_len: usize) -> FfiResult {
     to_ffi_result(image_info(input_ptr, input_len))
 }
 
-unsafe fn image_info(
-    input_ptr: *const u8,
-    input_len: usize,
-) -> NativeResult<(Vec<u8>, u32, u32)> {
+unsafe fn image_info(input_ptr: *const u8, input_len: usize) -> NativeResult<(Vec<u8>, u32, u32)> {
     if input_ptr.is_null() || input_len == 0 {
         return Err(NativeError::InvalidInput("Null or empty input buffer"));
     }
@@ -377,7 +391,12 @@ pub unsafe extern "C" fn rust_blurhash_encode(
     components_x: u32,
     components_y: u32,
 ) -> FfiResult {
-    to_ffi_result(blurhash_encode(input_ptr, input_len, components_x, components_y))
+    to_ffi_result(blurhash_encode(
+        input_ptr,
+        input_len,
+        components_x,
+        components_y,
+    ))
 }
 
 unsafe fn blurhash_encode(
@@ -421,10 +440,10 @@ unsafe fn blurhash_decode(
     }
 
     let hash_str = CStr::from_ptr(hash_ptr).to_str()?;
-    let img = blurhash_bridge::decode_blurhash(hash_str, width, height)
-        .map_err(NativeError::Decode)?;
-    let png_bytes = formats::encode_to_format(&img, OutputFormat::Png, 100)
-        .map_err(NativeError::Encode)?;
+    let img =
+        blurhash_bridge::decode_blurhash(hash_str, width, height).map_err(NativeError::Decode)?;
+    let png_bytes =
+        formats::encode_to_format(&img, OutputFormat::Png, 100).map_err(NativeError::Encode)?;
     Ok((png_bytes, width, height))
 }
 
