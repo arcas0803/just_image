@@ -16,14 +16,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target
 
 jobs:
   quality:
     name: Rust, Dart, Flutter and package
     runs-on: ubuntu-22.04
     timeout-minutes: 45
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/just-image-cargo
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -78,8 +77,6 @@ jobs:
         os: [macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/just-image-cargo
     defaults:
       run:
         shell: bash
