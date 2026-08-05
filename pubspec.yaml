@@ -21,7 +21,8 @@ dependencies:
   cross_file: ^0.3.4+2
   crypto: ^3.0.6
   ffi: ^2.2.0
-  hooks: ^2.1.0
+  # hooks 2.1.0 requires meta 1.19, while Flutter 3.44 pins meta 1.18.
+  hooks: '>=2.0.0 <2.1.0'
 
 dev_dependencies:
   ffigen: ^21.0.0

@@ -234,3 +234,34 @@ pub enum Operation {
     #[serde(rename = "thumbnail")]
     Thumbnail { max_width: u32, max_height: u32 },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_is_valid() {
+        assert!(PipelineConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_zero_sized_operations() {
+        let config = PipelineConfig {
+            operations: vec![Operation::Resize {
+                width: 0,
+                height: 10,
+            }],
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_effect_ranges() {
+        let config = PipelineConfig {
+            operations: vec![Operation::Brightness { value: 2.0 }],
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+}

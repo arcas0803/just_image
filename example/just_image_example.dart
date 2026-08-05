@@ -40,7 +40,7 @@ Future<void> main() async {
   final result = await gradientFile.justImage
       .resize(100, 75)
       .sharpen(1.5)
-      .encode(const JpegOutput(quality: 85))
+      .encode(OutputFormat.jpeg, quality: 85)
       .run();
 
   File('$outDir/01_resized.jpg').writeAsBytesSync(result.data);
@@ -144,7 +144,7 @@ Future<void> main() async {
   // ─────────────────────────────────────
   print('5. Batch processing: 3 images in parallel');
 
-  final batchResults = await JustImage.processBatch([
+  final batch = await JustImage.processBatch([
     gradientFile.justImage
         .resize(80, 60)
         .sharpen(0.8)
@@ -159,10 +159,14 @@ Future<void> main() async {
         .encode(const WebpOutput(quality: 75)),
   ], concurrency: 3);
 
+  final batchResults = batch.successful;
   for (var i = 0; i < batchResults.length; i++) {
     File('$outDir/05_batch_$i.webp').writeAsBytesSync(batchResults[i].data);
   }
-  print('   → ${batchResults.length} images processed\n');
+  print(
+    '   → ${batch.successCount} images processed '
+    '(${batch.failureCount} failed)\n',
+  );
 
   // ─────────────────────────────────────
   // 6. Format conversion
