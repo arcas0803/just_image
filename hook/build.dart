@@ -221,7 +221,8 @@ String _rustTarget(CodeConfig code) {
     (OS.macOS, Architecture.arm64) => 'aarch64-apple-darwin',
     (OS.macOS, Architecture.x64) => 'x86_64-apple-darwin',
     (OS.iOS, Architecture.arm64) => _iosDeviceOrSimulator(code, isArm64: true),
-    (OS.iOS, Architecture.x64) => 'x86_64-apple-ios-sim',
+    // Rust's historical x64 simulator target omits the `-sim` suffix.
+    (OS.iOS, Architecture.x64) => 'x86_64-apple-ios',
     (OS.linux, Architecture.x64) => 'x86_64-unknown-linux-gnu',
     (OS.linux, Architecture.arm64) => 'aarch64-unknown-linux-gnu',
     (OS.windows, Architecture.x64) => 'x86_64-pc-windows-msvc',
@@ -241,7 +242,7 @@ String _iosDeviceOrSimulator(CodeConfig code, {required bool isArm64}) {
   if (isArm64) {
     return isSimulator ? 'aarch64-apple-ios-sim' : 'aarch64-apple-ios';
   }
-  return 'x86_64-apple-ios-sim';
+  return 'x86_64-apple-ios';
 }
 
 // ──────────────────────────────────────────────

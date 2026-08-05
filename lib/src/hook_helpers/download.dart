@@ -12,7 +12,7 @@ import 'hashes.dart';
 /// Constructs the download URI for a given platform binary name.
 Uri _downloadUri(String fileName) {
   return Uri.parse(
-    'https://github.com/arcas0803/just_image/releases/download/v$binaryVersion/$fileName',
+    'https://github.com/arcas0803/just_image/releases/download/$binaryReleaseTag/$fileName',
   );
 }
 

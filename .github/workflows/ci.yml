@@ -2,108 +2,77 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v.2.0.0]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Reuse native objects between the package and both consumer examples.
+  CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target
 
 jobs:
-  # ─────────────────────────────────────
-  # Rust: lint + test
-  # ─────────────────────────────────────
-  rust-check:
-    name: Rust Check
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/native
+  verify:
+    name: Rust, Dart and Flutter consumers
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: x86_64-unknown-linux-gnu
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: subosito/flutter-action@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src/native/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src/native/Cargo.lock') }}
+          channel: stable
+          cache: false
 
-      - name: Format check
-        run: cargo fmt --check
+      - name: Resolve package dependencies
+        run: dart pub get
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Build (release)
-        run: cargo build --release
-
-  # ─────────────────────────────────────
-  # Dart: analyze + test
-  # ─────────────────────────────────────
-  dart-check:
-    name: Dart Analyze & Test
-    needs: rust-check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: stable
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Rust native library
+      - name: Check Rust formatting and lints
         working-directory: src/native
-        run: cargo build --release
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
 
-      - name: Install dependencies
-        run: dart pub get
+      - name: Run Rust tests
+        working-directory: src/native
+        run: cargo test --locked
 
-      - name: Analyze
-        run: dart analyze --fatal-infos
+      - name: Check Dart formatting and analysis
+        run: |
+          dart format --output=none --set-exit-if-changed lib test hook tool example/cli example/flutter_app/lib example/flutter_app/test
+          dart analyze --fatal-infos
 
-      - name: Format check
-        run: dart format --output=none --set-exit-if-changed .
+      - name: Run real Dart to Rust integration tests
+        run: dart test --chain-stack-traces
 
-      - name: Test just_image
-        run: dart test
-        env:
-          LD_LIBRARY_PATH: src/native/target/release
-          DYLD_LIBRARY_PATH: src/native/target/release
+      - name: Verify independent CLI consumer
+        working-directory: example/cli
+        run: |
+          dart pub get
+          dart analyze
+          dart run bin/main.dart --output=${{ runner.temp }}/just_image.webp
+          test -s ${{ runner.temp }}/just_image.webp
 
-  # ─────────────────────────────────────
-  # Dry-run publish
-  # ─────────────────────────────────────
-  publish-dry-run:
-    name: Publish Dry Run
-    needs: dart-check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Verify independent Flutter consumer
+        working-directory: example/flutter_app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
 
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: stable
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        run: dart pub get
-
-      - name: Dry run - just_image
+      - name: Validate pub.dev package
         run: dart pub publish --dry-run

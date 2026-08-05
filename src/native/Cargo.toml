@@ -1,6 +1,6 @@
 [package]
 name = "just_image_native"
-version = "1.0.1"
+version = "2.0.0"
 edition = "2021"
 authors = ["just_image contributors"]
 description = "High-performance image processing core for just_image Dart package"
@@ -27,15 +27,18 @@ blurhash = "0.2"
 
 [profile.release]
 opt-level = 3
-# "fat" gives the best runtime performance. If you hit iOS linker issues,
-# change this to "thin" or false.
-lto = "fat"
+# Thin LTO keeps cross-crate optimisation while substantially reducing release
+# build time and CI minutes across the multi-platform binary matrix.
+lto = "thin"
 codegen-units = 1
 panic = "unwind"
 # Keep exported FFI symbols intact; only strip debug info.
 strip = "debuginfo"
 
+[profile.dev]
+opt-level = 1
+debug = true
+
 [profile.release.build-override]
 opt-level = 3
-
 
