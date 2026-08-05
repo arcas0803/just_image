@@ -71,7 +71,7 @@ fn extract_exif_bytes(data: &[u8]) -> Option<Vec<u8>> {
     }
 
     // PNG: buscar chunk eXIf
-    if data.len() > 8 && &data[0..4] == b"\x89PNG" {
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
         let mut pos = 8;
         while pos + 12 < data.len() {
             let chunk_len =
@@ -111,9 +111,7 @@ fn extract_icc_profile(data: &[u8]) -> Option<Vec<u8>> {
             if marker == 0xE2 && seg_len > 14 {
                 let seg_start = pos + 4;
                 let icc_header = b"ICC_PROFILE\0";
-                if seg_start + 14 < data.len()
-                    && &data[seg_start..seg_start + 12] == icc_header
-                {
+                if seg_start + 14 < data.len() && &data[seg_start..seg_start + 12] == icc_header {
                     let chunk_num = data[seg_start + 12];
                     let _total = data[seg_start + 13];
                     let payload_start = seg_start + 14;
@@ -141,7 +139,7 @@ fn extract_icc_profile(data: &[u8]) -> Option<Vec<u8>> {
     }
 
     // PNG: buscar chunk iCCP
-    if data.len() > 8 && &data[0..4] == b"\x89PNG" {
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
         let mut pos = 8;
         while pos + 12 < data.len() {
             let chunk_len =
@@ -214,7 +212,7 @@ pub fn inject_metadata_jpeg(
         let header = b"ICC_PROFILE\0";
         // Fragmentar si > 65519 bytes
         let max_chunk = 65519 - 14;
-        let total_chunks = (icc.len() + max_chunk - 1) / max_chunk;
+        let total_chunks = icc.len().div_ceil(max_chunk);
 
         for (i, chunk) in icc.chunks(max_chunk).enumerate() {
             let seg_len = chunk.len() + 14 + 2;

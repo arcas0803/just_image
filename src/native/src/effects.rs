@@ -49,29 +49,35 @@ pub fn sobel_edges(img: &DynamicImage) -> DynamicImage {
     let (w, h) = gray.dimensions();
     let mut output = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(w, h);
 
-    let src: Vec<Vec<u8>> = (0..h)
-        .map(|y| (0..w).map(|x| gray.get_pixel(x, y).0[0]).collect())
-        .collect();
+    if w < 3 || h < 3 {
+        for pixel in output.pixels_mut() {
+            *pixel = Rgba([0, 0, 0, 255]);
+        }
+        return DynamicImage::ImageRgba8(output);
+    }
+
+    let src = gray.as_raw();
 
     let rows: Vec<Vec<[u8; 4]>> = (1..h - 1)
         .into_par_iter()
         .map(|y| {
+            let yu = y as usize;
             let mut row = Vec::with_capacity(w as usize);
             row.push([0u8, 0, 0, 255]);
             for x in 1..(w - 1) {
-                let (xu, yu) = (x as usize, y as usize);
-                let gx: i32 = -1 * src[yu - 1][xu - 1] as i32
-                    + 1 * src[yu - 1][xu + 1] as i32
-                    + -2 * src[yu][xu - 1] as i32
-                    + 2 * src[yu][xu + 1] as i32
-                    + -1 * src[yu + 1][xu - 1] as i32
-                    + 1 * src[yu + 1][xu + 1] as i32;
-                let gy: i32 = -1 * src[yu - 1][xu - 1] as i32
-                    + -2 * src[yu - 1][xu] as i32
-                    + -1 * src[yu - 1][xu + 1] as i32
-                    + 1 * src[yu + 1][xu - 1] as i32
-                    + 2 * src[yu + 1][xu] as i32
-                    + 1 * src[yu + 1][xu + 1] as i32;
+                let xu = x as usize;
+                let gx: i32 = -(src[(yu - 1) * w as usize + xu - 1] as i32)
+                    + src[(yu - 1) * w as usize + xu + 1] as i32
+                    + -2 * src[yu * w as usize + xu - 1] as i32
+                    + 2 * src[yu * w as usize + xu + 1] as i32
+                    + -(src[(yu + 1) * w as usize + xu - 1] as i32)
+                    + src[(yu + 1) * w as usize + xu + 1] as i32;
+                let gy: i32 = -(src[(yu - 1) * w as usize + xu - 1] as i32)
+                    + -2 * src[(yu - 1) * w as usize + xu] as i32
+                    + -(src[(yu - 1) * w as usize + xu + 1] as i32)
+                    + src[(yu + 1) * w as usize + xu - 1] as i32
+                    + 2 * src[(yu + 1) * w as usize + xu] as i32
+                    + src[(yu + 1) * w as usize + xu + 1] as i32;
                 let mag = ((gx * gx + gy * gy) as f64).sqrt().min(255.0) as u8;
                 row.push([mag, mag, mag, 255]);
             }
@@ -122,12 +128,7 @@ pub fn adjust_contrast(img: &DynamicImage, value: f32) -> DynamicImage {
 ///
 /// `hue` is a rotation in degrees, `saturation` and `lightness` are offsets
 /// in the range [-1.0, 1.0].
-pub fn adjust_hsl(
-    img: &DynamicImage,
-    hue: f32,
-    saturation: f32,
-    lightness: f32,
-) -> DynamicImage {
+pub fn adjust_hsl(img: &DynamicImage, hue: f32, saturation: f32, lightness: f32) -> DynamicImage {
     map_rgb(img, |[r, g, b]| {
         let (h, s, l) = rgb_to_hsl(r, g, b);
         let new_h = (h + hue).rem_euclid(360.0);
@@ -209,4 +210,19 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
         return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
     }
     p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sobel_handles_images_smaller_than_the_kernel() {
+        let input = DynamicImage::new_rgba8(1, 1);
+
+        let output = sobel_edges(&input).to_rgba8();
+
+        assert_eq!(output.dimensions(), (1, 1));
+        assert_eq!(output.get_pixel(0, 0).0, [0, 0, 0, 255]);
+    }
 }

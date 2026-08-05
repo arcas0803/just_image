@@ -41,6 +41,8 @@ jobs:
             artifact: just_image_native-windows-arm64.dll
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '10.15'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -75,9 +77,12 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact: libjust_image_native-linux-arm64.so
     runs-on: ${{ matrix.os }}
+    container: ubuntu:20.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Install native build prerequisites
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates curl git pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -108,6 +113,8 @@ jobs:
             targets: x86_64-apple-ios
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

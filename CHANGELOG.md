@@ -1,3 +1,50 @@
+## 2.0.0
+
+### Breaking changes
+
+- **Native Assets ABI**: FFI bindings are generated from a versioned C header and resolved using `@Native`; runtime loading no longer depends on the working directory.
+- **`OutputFormat` enum**: New `OutputFormat` enum (`jpeg`, `png`, `webp`, `avif`, `tiff`, `bmp`) replaces the need for `OutputConfig` subclasses in most cases. Use `pipeline.encode(OutputFormat.webp, quality: 85)`.
+- **`ImageResult.format`**: Changed from `String` to the new `ImageFormat` enum.
+- **Removed `ImagePipeline.runSync()`**: Use `run()` exclusively — it already runs in a background `Isolate`.
+- **`JustImage.processBatch`** now returns `BatchResult` instead of `List<ImageResult>`. `BatchResult` captures both successes and failures, allowing partial success handling.
+- **Removed private pipeline subclasses** (`_BytesImagePipeline`, `_FileImagePipeline`, `_XFileImagePipeline`). Use named constructors `ImagePipeline.bytes()`, `.file()`, `.xfile()` directly.
+- Requires Dart 3.10.8 and Flutter 3.38 or newer.
+- Bumped package version to 2.0.0.
+
+### New features
+
+- **Zero-configuration native delivery**: released packages always download the correct SHA-256-verified binary, regardless of whether Cargo is installed.
+- **Versioned binary cache** with atomic downloads, timeouts and retries.
+- **Independent examples** for Dart CLI and Flutter desktop/mobile projects.
+- **Debug build profile**: Set `debug_build: true` in `hooks.user_defines` for faster dev builds (uses `cargo build --profile dev` instead of `--release`).
+- **`BatchResult`**: New result type for batch processing with `successCount`, `failureCount`, `allSucceeded`, and `successful` getters.
+- **`OutputConfig.from(OutputFormat, quality?)`**: Factory to create `OutputConfig` from enum.
+- **Generated `@Native` bindings** with an explicit ABI version check.
+
+### Bug fixes
+
+- **iOS device linking**: Fixed `___chkstk_darwin` symbol not found by ensuring deployment target is respected.
+- **ICC profile injection**: `preserve_icc` now works independently of `preserve_metadata` for JPEG output.
+- **PNG signature check**: Full 8-byte PNG magic number check instead of partial 4-byte.
+- **WebP encoding**: Added empty-output check to detect silent encoding failures.
+- **`processBatch` error handling**: Individual pipeline failures no longer abort the entire batch.
+- **Public argument validation**: dimensions, quality, effects, BlurHash and concurrency fail before crossing FFI.
+- **Panic containment**: Rust panics are converted to native errors instead of unwinding through `extern "C"`.
+- **`_Semaphore`**: Prevented count from going negative on excess `release()` calls.
+- **`utf8.decode`**: Replaced `String.fromCharCodes` with `utf8.decode` for BlurHash and image info JSON parsing.
+- **Sobel edge detection**: Uses a flat source buffer and safely handles images smaller than its 3×3 kernel.
+- **`CARGO_TARGET_DIR`**: Build hook now respects `CARGO_TARGET_DIR` environment variable.
+- **Android NDK**: Only configures the current target's toolchain instead of all targets.
+- **`rust_free_result`**: Marked `#[allow(dead_code)]`.
+- **xcrun errors**: `xcrun` failures now log stderr instead of silently swallowing.
+
+### Testing and CI
+
+- Added real Dart-to-Rust integration tests for every output format, transforms, watermark, BlurHash and partial batch failures.
+- Added Rust unit tests for formats and native validation.
+- Added a 12-target native release workflow with one-day temporary artifact retention and automatic cleanup for GitHub Free.
+- Added a zero-configuration publish gate before pub.dev OIDC publishing.
+
 ## 1.0.8
 
 - Fixed Android cross-compilation on macOS: use the versioned NDK clang script (e.g. `aarch64-linux-android29-clang`) as the Cargo linker instead of the generic `clang` binary. The versioned script has the correct `--target` baked in and routes to the NDK's own `ld.lld`, avoiding both the `ld64.lld` (Mach-O) and the untargeted-clang macOS-flags issues that caused linker failures in v1.0.7.

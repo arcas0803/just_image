@@ -23,13 +23,9 @@ pub fn resize_with_filter(
     let src_image = img.to_rgba8();
     let (src_w, src_h) = (src_image.width(), src_image.height());
 
-    let src = fir::images::Image::from_vec_u8(
-        src_w,
-        src_h,
-        src_image.into_raw(),
-        fir::PixelType::U8x4,
-    )
-    .expect("valid RGBA source");
+    let src =
+        fir::images::Image::from_vec_u8(src_w, src_h, src_image.into_raw(), fir::PixelType::U8x4)
+            .expect("valid RGBA source");
 
     let mut dst = fir::images::Image::new(width, height, fir::PixelType::U8x4);
 
@@ -61,9 +57,8 @@ pub fn rotate(img: &DynamicImage, degrees: f64) -> DynamicImage {
     let deg_normalized = degrees.rem_euclid(360.0);
 
     // Fast paths for exact angles.
-    match (deg_normalized - 0.0).abs() < 0.01 || (deg_normalized - 360.0).abs() < 0.01 {
-        true => return img.clone(),
-        false => {}
+    if (deg_normalized - 0.0).abs() < 0.01 || (deg_normalized - 360.0).abs() < 0.01 {
+        return img.clone();
     }
     if (deg_normalized - 90.0).abs() < 0.01 {
         return img.rotate90();
@@ -78,12 +73,7 @@ pub fn rotate(img: &DynamicImage, degrees: f64) -> DynamicImage {
     // General case: rotate about the centre with bilinear interpolation.
     let radians = (-degrees).to_radians() as f32;
     let rgba = img.to_rgba8();
-    let rotated = rotate_about_center(
-        &rgba,
-        radians,
-        Interpolation::Bilinear,
-        Rgba([0, 0, 0, 0]),
-    );
+    let rotated = rotate_about_center(&rgba, radians, Interpolation::Bilinear, Rgba([0, 0, 0, 0]));
     DynamicImage::ImageRgba8(rotated)
 }
 
