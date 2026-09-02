@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -7,7 +8,7 @@ import 'package:ffi/ffi.dart';
 import 'exceptions.dart';
 import 'native_bindings.g.dart' as native;
 
-const _supportedAbiVersion = 1;
+const _supportedAbiVersion = 3;
 
 // ──────────────────────────────────────────────
 // Data transferred across Isolate boundaries
@@ -15,14 +16,14 @@ const _supportedAbiVersion = 1;
 
 /// Payload sent to the background isolate for processing.
 final class PipelineRequest {
-  final Uint8List inputBytes;
+  final TransferableTypedData inputData;
   final String configJson;
-  final Uint8List? watermarkBytes;
+  final TransferableTypedData? watermarkData;
 
   const PipelineRequest({
-    required this.inputBytes,
+    required this.inputData,
     required this.configJson,
-    this.watermarkBytes,
+    this.watermarkData,
   });
 }
 
@@ -93,34 +94,88 @@ class NativeBridge {
 
   /// Processes an image through the native Rust pipeline.
   PipelineResponse processPipeline(PipelineRequest request) {
+    final inputBytes = request.inputData.materialize().asUint8List();
+    final watermarkBytes = request.watermarkData?.materialize().asUint8List();
     return using((arena) {
-      final inputPtr = arena<Uint8>(request.inputBytes.length);
-      inputPtr
-          .asTypedList(request.inputBytes.length)
-          .setAll(0, request.inputBytes);
+      final inputPtr = arena<Uint8>(inputBytes.length);
+      inputPtr.asTypedList(inputBytes.length).setAll(0, inputBytes);
 
       final configPtr = request.configJson.toNativeUtf8(allocator: arena);
 
       Pointer<Uint8> watermarkPtr = nullptr;
       var watermarkLen = 0;
-      if (request.watermarkBytes != null &&
-          request.watermarkBytes!.isNotEmpty) {
-        watermarkLen = request.watermarkBytes!.length;
+      if (watermarkBytes != null && watermarkBytes.isNotEmpty) {
+        watermarkLen = watermarkBytes.length;
         watermarkPtr = arena<Uint8>(watermarkLen);
-        watermarkPtr
-            .asTypedList(watermarkLen)
-            .setAll(0, request.watermarkBytes!);
+        watermarkPtr.asTypedList(watermarkLen).setAll(0, watermarkBytes);
       }
 
       final result = native.rust_process_pipeline(
         inputPtr,
-        request.inputBytes.length,
+        inputBytes.length,
         configPtr.cast<Char>(),
         watermarkPtr,
         watermarkLen,
       );
 
       return _unwrapFfiResult(result);
+    });
+  }
+
+  /// Processes a JPEG/PNG/BMP image without retaining optional native
+  /// formats, colour management, watermarks or artistic filters.
+  PipelineResponse processCorePipeline(PipelineRequest request) {
+    final inputBytes = request.inputData.materialize().asUint8List();
+    return using((arena) {
+      final inputPtr = arena<Uint8>(inputBytes.length);
+      inputPtr.asTypedList(inputBytes.length).setAll(0, inputBytes);
+      final configPtr = request.configJson.toNativeUtf8(allocator: arena);
+      final result = native.rust_process_core_pipeline(
+        inputPtr,
+        inputBytes.length,
+        configPtr.cast<Char>(),
+      );
+      return _unwrapFfiResult(result);
+    });
+  }
+
+  /// Processes input/output formats in the optional AVIF/SVG codec group.
+  PipelineResponse processExtendedPipeline(PipelineRequest request) =>
+      _processFullPipeline(request, native.rust_process_extended_pipeline);
+
+  PipelineResponse _processFullPipeline(
+    PipelineRequest request,
+    native.FfiResult Function(
+      Pointer<Uint8>,
+      int,
+      Pointer<Char>,
+      Pointer<Uint8>,
+      int,
+    )
+    process,
+  ) {
+    final inputBytes = request.inputData.materialize().asUint8List();
+    final watermarkBytes = request.watermarkData?.materialize().asUint8List();
+    return using((arena) {
+      final inputPtr = arena<Uint8>(inputBytes.length);
+      inputPtr.asTypedList(inputBytes.length).setAll(0, inputBytes);
+      final configPtr = request.configJson.toNativeUtf8(allocator: arena);
+      Pointer<Uint8> watermarkPtr = nullptr;
+      var watermarkLen = 0;
+      if (watermarkBytes case final bytes? when bytes.isNotEmpty) {
+        watermarkLen = bytes.length;
+        watermarkPtr = arena<Uint8>(watermarkLen);
+        watermarkPtr.asTypedList(watermarkLen).setAll(0, bytes);
+      }
+      return _unwrapFfiResult(
+        process(
+          inputPtr,
+          inputBytes.length,
+          configPtr.cast<Char>(),
+          watermarkPtr,
+          watermarkLen,
+        ),
+      );
     });
   }
 

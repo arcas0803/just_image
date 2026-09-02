@@ -10,37 +10,32 @@ pub fn gaussian_blur(img: &DynamicImage, sigma: f32) -> DynamicImage {
 
 /// Unsharp mask sharpen: original + amount * (original - blurred).
 pub fn unsharp_mask(img: &DynamicImage, amount: f32, threshold: f32) -> DynamicImage {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
+    let mut rgba = img.to_rgba8();
+    let w = rgba.width();
     let blurred_rgba = image::imageops::blur(img, 1.0);
 
-    let src = rgba.as_raw();
     let blur = blurred_rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
     let row_stride = w as usize * 4;
 
-    dst.par_chunks_mut(row_stride)
+    rgba.par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let off = y * row_stride;
             for i in (0..row.len()).step_by(4) {
                 for c in 0..3 {
-                    let orig = src[off + i + c] as f32;
+                    let orig = row[i + c] as f32;
                     let blur_val = blur[off + i + c] as f32;
                     let diff = (orig - blur_val).abs();
                     row[i + c] = if diff > threshold {
                         (orig + amount * (orig - blur_val)).clamp(0.0, 255.0) as u8
                     } else {
-                        src[off + i + c]
+                        orig as u8
                     };
                 }
-                row[i + 3] = src[off + i + 3];
             }
         });
 
-    ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(w, h, dst)
-        .map(DynamicImage::ImageRgba8)
-        .expect("buffer size matches image dimensions")
+    DynamicImage::ImageRgba8(rgba)
 }
 
 /// Sobel edge detection. Returns a greyscale edge map with alpha=255.

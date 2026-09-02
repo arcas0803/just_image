@@ -1,13 +1,8 @@
 // hook/build.dart — Native Assets build hook for just_image.
 //
-// Compiles the Rust crate at src/native/ into a dynamic library and registers
-// it as a native code asset with DynamicLoadingBundled link mode on all
-// platforms (macOS, iOS, Linux, Windows, Android).
-//
-// StaticLinking is not yet supported by the Dart/Flutter SDK (see
-// https://github.com/dart-lang/sdk/issues/49418), so we always produce cdylib
-// and register DynamicLoadingBundled. This resolves the intermittent build
-// failures on iOS simulator, iOS device, and production builds.
+// Compiles the Rust crate at src/native/. JIT/debug commands receive the
+// dynamic library directly. AOT/release commands receive a static library via
+// hook/link.dart, which prunes symbols that Dart 3.13 proved unreachable.
 
 import 'dart:io';
 
@@ -28,8 +23,11 @@ Future<void> main(List<String> args) async {
     final codeConfig = input.config.code;
 
     final targetTriple = _rustTarget(codeConfig);
-    final linkMode = DynamicLoadingBundled();
-    final libName = codeConfig.targetOS.libraryFileName(_baseName, linkMode);
+    final linkingEnabled = input.config.linkingEnabled;
+    final linkMode = linkingEnabled ? StaticLinking() : DynamicLoadingBundled();
+    final libName = linkingEnabled
+        ? codeConfig.targetOS.staticlibFileName(_baseName)
+        : codeConfig.targetOS.libraryFileName(_baseName, linkMode);
 
     // Released packages always prefer verified pre-built binaries, regardless
     // of whether Cargo happens to be installed on the consumer machine.
@@ -40,6 +38,7 @@ Future<void> main(List<String> args) async {
       codeConfig.targetOS.name,
       codeConfig.targetArchitecture.name,
       variant: variant,
+      staticLinking: linkingEnabled,
     );
     final requestedLocalBuild =
         input.userDefines['local_build'] as bool? ?? false;
@@ -62,6 +61,7 @@ Future<void> main(List<String> args) async {
         targetTriple: targetTriple,
         linkMode: linkMode,
         libName: libName,
+        routeToLinkHook: linkingEnabled,
       );
     } else {
       await _downloadPrebuilt(
@@ -71,6 +71,7 @@ Future<void> main(List<String> args) async {
         linkMode: linkMode,
         libName: libName,
         variant: variant,
+        routeToLinkHook: linkingEnabled,
       );
     }
   });
@@ -85,8 +86,10 @@ Future<void> _compileWithCargo({
   required String targetTriple,
   required LinkMode linkMode,
   required String libName,
+  required bool routeToLinkHook,
 }) async {
   final env = await _cargoEnv(codeConfig);
+  _isolateCargoTargetDirectory(env, input.outputDirectoryShared, targetTriple);
   if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
     final appleEnv = await _appleEnv(
       codeConfig,
@@ -144,14 +147,17 @@ Future<void> _compileWithCargo({
     );
   }
 
-  output.assets.code.add(
-    CodeAsset(
-      package: input.packageName,
-      name: 'src/native_bindings.g.dart',
-      linkMode: linkMode,
-      file: libPath,
-    ),
+  final asset = CodeAsset(
+    package: input.packageName,
+    name: 'src/native_bindings.g.dart',
+    linkMode: linkMode,
+    file: libPath,
   );
+  if (routeToLinkHook) {
+    output.assets.code.add(asset, routing: ToLinkHook(input.packageName));
+  } else {
+    output.assets.code.add(asset);
+  }
 
   output.dependencies.addAll([
     crateDir.resolve('Cargo.toml'),
@@ -165,6 +171,26 @@ Future<void> _compileWithCargo({
   ]);
 }
 
+/// Gives every Rust target its own Cargo root.
+///
+/// Flutter may invoke arm64 and x64 Native Assets builds concurrently. Cargo
+/// otherwise shares host build-script outputs between those invocations,
+/// which can intermittently link a host executable with the other target's
+/// Apple SDK flags.
+void _isolateCargoTargetDirectory(
+  Map<String, String> env,
+  Uri outputDirectoryShared,
+  String targetTriple,
+) {
+  final configuredRoot = env['CARGO_TARGET_DIR'];
+  final targetRoot = configuredRoot == null
+      ? outputDirectoryShared.resolve('cargo/$targetTriple/').toFilePath()
+      : Directory(configuredRoot).absolute.uri
+            .resolve('just_image/$targetTriple/')
+            .toFilePath();
+  env['CARGO_TARGET_DIR'] = targetRoot;
+}
+
 /// Downloads a pre-built binary from GitHub releases (no Rust required).
 Future<void> _downloadPrebuilt({
   required BuildInput input,
@@ -173,6 +199,7 @@ Future<void> _downloadPrebuilt({
   required LinkMode linkMode,
   required String libName,
   String? variant,
+  required bool routeToLinkHook,
 }) async {
   final osName = codeConfig.targetOS.name;
   final archName = codeConfig.targetArchitecture.name;
@@ -182,6 +209,7 @@ Future<void> _downloadPrebuilt({
     os: osName,
     arch: archName,
     variant: variant,
+    staticLinking: routeToLinkHook,
     outputDir: outputDir,
   );
 
@@ -191,14 +219,17 @@ Future<void> _downloadPrebuilt({
   await targetFile.parent.create(recursive: true);
   await file.copy(targetFile.path);
 
-  output.assets.code.add(
-    CodeAsset(
-      package: input.packageName,
-      name: 'src/native_bindings.g.dart',
-      linkMode: linkMode,
-      file: targetPath,
-    ),
+  final asset = CodeAsset(
+    package: input.packageName,
+    name: 'src/native_bindings.g.dart',
+    linkMode: linkMode,
+    file: targetPath,
   );
+  if (routeToLinkHook) {
+    output.assets.code.add(asset, routing: ToLinkHook(input.packageName));
+  } else {
+    output.assets.code.add(asset);
+  }
 }
 
 String? _binaryVariant(CodeConfig code) {
@@ -448,6 +479,34 @@ exec "$compilerPath" $escapedFlags "\$@"
 ''');
   await Process.run('chmod', ['+x', wrapperFile.path]);
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = wrapperFile.path;
+
+  // Cargo build scripts and proc macros are executables for the host. Flutter
+  // invokes hooks from an Xcode environment whose implicit `cc` flags can
+  // describe the target slice instead. Pin a separate host linker so those
+  // executables always use the host architecture and macOS SDK.
+  final hostArchitecture = Architecture.current;
+  final hostTarget = hostArchitecture == Architecture.arm64
+      ? 'aarch64-apple-darwin'
+      : 'x86_64-apple-darwin';
+  if (hostTarget != target) {
+    final hostCompiler = await _xcrunToolPath('macosx', 'clang');
+    final hostSdk = await _xcrunSdkPath('macosx');
+    if (hostCompiler != null && hostSdk != null) {
+      final hostArch = hostArchitecture == Architecture.arm64
+          ? 'arm64'
+          : 'x86_64';
+      final hostWrapper = File.fromUri(
+        outputDirectory.resolve('${hostTarget}_host_linker_wrapper.sh'),
+      );
+      await hostWrapper.writeAsString('''
+#!/bin/sh
+exec "$hostCompiler" -isysroot "$hostSdk" -arch "$hostArch" "\$@"
+''');
+      await Process.run('chmod', ['+x', hostWrapper.path]);
+      env['CARGO_TARGET_${_cargoTargetEnv(hostTarget)}_LINKER'] =
+          hostWrapper.path;
+    }
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -564,6 +623,10 @@ void _applyAndroidCCompilerConfig(
   env['CXX_$ccTarget'] = _cxxFromCompiler(targetCompiler);
   env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = targetCompiler;
+  final ndkHome = _findNdkHome();
+  if (ndkHome != null) {
+    _applyAndroidCmakeToolchain(env, ndkHome, target);
+  }
 }
 
 /// Derives a likely C++ compiler path from a C compiler path.
@@ -633,6 +696,22 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
   // The versioned clang script already has the correct --target and uses the
   // NDK's own ld.lld, so no wrapper is needed on any platform.
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
+  _applyAndroidCmakeToolchain(env, ndkHome, rustTarget);
+}
+
+/// Points CMake-based Rust dependencies (notably libaom) at the NDK. The
+/// target-suffixed variable is consumed by the `cmake` crate without leaking
+/// Android settings into host build scripts.
+void _applyAndroidCmakeToolchain(
+  Map<String, String> env,
+  String ndkHome,
+  String rustTarget,
+) {
+  final toolchain = '$ndkHome/build/cmake/android.toolchain.cmake';
+  if (!File(toolchain).existsSync()) {
+    throw BuildError(message: 'Android CMake toolchain not found: $toolchain');
+  }
+  env['CMAKE_TOOLCHAIN_FILE_${_ccTargetEnv(rustTarget)}'] = toolchain;
 }
 
 /// Maps a Rust Android target triple to the clang prefix used by the NDK.

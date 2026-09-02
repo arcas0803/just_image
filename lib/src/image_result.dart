@@ -6,7 +6,8 @@ enum ImageFormat {
   png,
   webp,
   tiff,
-  bmp;
+  bmp,
+  avif;
 
   /// Parses a format string (e.g. `'jpeg'`) into an [ImageFormat].
   static ImageFormat fromString(String name) => switch (name) {
@@ -15,6 +16,7 @@ enum ImageFormat {
     'webp' => ImageFormat.webp,
     'tiff' => ImageFormat.tiff,
     'bmp' => ImageFormat.bmp,
+    'avif' => ImageFormat.avif,
     _ => throw ArgumentError('Unknown image format: $name'),
   };
 }

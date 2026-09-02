@@ -1,9 +1,9 @@
 name: just_image
 description: >-
   High-performance image processing engine powered by Rust FFI.
-  Supports WebP, JPEG, PNG, TIFF and BMP with automatic native binaries,
+  Supports AVIF, SVG, WebP, JPEG, PNG, TIFF and BMP with automatic native binaries,
   parallel processing and professional metadata preservation.
-version: 2.0.0
+version: 3.0.0
 repository: https://github.com/arcas0803/just_image
 homepage: https://github.com/arcas0803/just_image
 topics:
@@ -14,15 +14,18 @@ topics:
   - flutter
 
 environment:
-  sdk: ^3.10.8
+  sdk: ^3.13.0
 
 dependencies:
+  # ffigen 21 currently constrains code_assets to 1.x.
   code_assets: ^1.2.1
   cross_file: ^0.3.4+2
   crypto: ^3.0.6
   ffi: ^2.2.0
-  # hooks 2.1.0 requires meta 1.19, while Flutter 3.44 pins meta 1.18.
-  hooks: '>=2.0.0 <2.1.0'
+  hooks: ^2.2.0
+  meta: ^1.19.0
+  native_toolchain_c: ^0.19.3
+  record_use: ^1.1.1
 
 dev_dependencies:
   ffigen: ^21.0.0

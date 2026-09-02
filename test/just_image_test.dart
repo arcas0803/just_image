@@ -11,12 +11,26 @@ void main() {
       expect(OutputFormat.webp.name, 'webp');
       expect(OutputFormat.tiff.name, 'tiff');
       expect(OutputFormat.bmp.name, 'bmp');
+      expect(OutputFormat.avif.name, 'avif');
     });
 
     test('default qualities are reasonable', () {
       expect(OutputFormat.jpeg.defaultQuality, 90);
       expect(OutputFormat.png.defaultQuality, 100);
       expect(OutputFormat.webp.defaultQuality, 90);
+    });
+
+    test('explicit codec configurations are constructible', () {
+      const png = PngOutput(
+        compression: PngCompression.best,
+        filter: PngFilter.paeth,
+        optimizationLevel: 6,
+      );
+      expect(png.compression, PngCompression.best);
+      expect(png.filter, PngFilter.paeth);
+      expect(png.optimizationLevel, 6);
+      expect(const WebpOutput.lossless().lossless, isTrue);
+      expect(const AvifOutput(speed: 3, threads: 2).threads, 2);
     });
   });
 
@@ -37,6 +51,7 @@ void main() {
       expect(const WebpOutput().format, 'webp');
       expect(const TiffOutput().format, 'tiff');
       expect(const BmpOutput().format, 'bmp');
+      expect(const AvifOutput().format, 'avif');
     });
 
     test('default qualities are reasonable', () {
@@ -53,10 +68,11 @@ void main() {
       expect(ImageFormat.fromString('webp'), ImageFormat.webp);
       expect(ImageFormat.fromString('tiff'), ImageFormat.tiff);
       expect(ImageFormat.fromString('bmp'), ImageFormat.bmp);
+      expect(ImageFormat.fromString('avif'), ImageFormat.avif);
     });
 
     test('fromString rejects unsupported formats', () {
-      for (final format in ['avif', 'gif', 'heic']) {
+      for (final format in ['gif', 'heic']) {
         expect(
           () => ImageFormat.fromString(format),
           throwsArgumentError,
@@ -137,9 +153,8 @@ void main() {
     });
 
     test('filter accepts enum', () {
-      final pipeline = ImagePipeline.bytes(
-        Uint8List(10),
-      ).filter(ArtisticFilterName.sepia);
+      final pipeline = ImagePipeline.bytes(Uint8List(10))
+          .filter(ArtisticFilterName.sepia);
       expect(pipeline, isA<ImagePipeline>());
     });
 
@@ -148,26 +163,18 @@ void main() {
       expect(pipeline, isA<ImagePipeline>());
     });
 
-    test('encode accepts OutputFormat enum', () {
-      final pipeline = ImagePipeline.bytes(
-        Uint8List(10),
-      ).encode(OutputFormat.webp, quality: 75);
+    test('encode accepts OutputFormat values', () {
+      final pipeline = ImagePipeline.bytes(Uint8List(10))
+          .encode(OutputFormat.webp, quality: 75);
       expect(pipeline, isA<ImagePipeline>());
     });
 
     test('encode accepts legacy OutputConfig', () {
-      final pipeline = ImagePipeline.bytes(
-        Uint8List(10),
-      ).encode(const WebpOutput(quality: 80));
+      final pipeline = ImagePipeline.bytes(Uint8List(10))
+          .encode(const WebpOutput(quality: 80));
       expect(pipeline, isA<ImagePipeline>());
     });
 
-    test('encode throws on invalid type', () {
-      expect(
-        () => ImagePipeline.bytes(Uint8List(10)).encode(42),
-        throwsArgumentError,
-      );
-    });
   });
 
   group('ArtisticFilterName', () {

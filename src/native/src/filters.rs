@@ -1,4 +1,4 @@
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::DynamicImage;
 use rayon::prelude::*;
 
 use crate::pipeline::ArtisticFilter;
@@ -48,35 +48,29 @@ fn apply_color_tint(img: &DynamicImage, tint: (u8, u8, u8), intensity: f32) -> D
 
 /// Applies a radial vignette (darkening from the centre outwards).
 fn apply_vignette(img: &DynamicImage, strength: f32) -> DynamicImage {
-    let rgba = img.to_rgba8();
+    let mut rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let src = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
     let row_stride = w as usize * 4;
     let cx = w as f32 / 2.0;
     let cy = h as f32 / 2.0;
     let max_dist = (cx * cx + cy * cy).sqrt();
 
-    dst.par_chunks_mut(row_stride)
+    rgba.par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
-            let off = y * row_stride;
             let dy = y as f32 - cy;
             for x in 0..(w as usize) {
                 let dx = x as f32 - cx;
                 let dist = (dx * dx + dy * dy).sqrt() / max_dist;
                 let factor = 1.0 - (dist * strength).clamp(0.0, 1.0);
                 let i = x * 4;
-                row[i] = (src[off + i] as f32 * factor).clamp(0.0, 255.0) as u8;
-                row[i + 1] = (src[off + i + 1] as f32 * factor).clamp(0.0, 255.0) as u8;
-                row[i + 2] = (src[off + i + 2] as f32 * factor).clamp(0.0, 255.0) as u8;
-                row[i + 3] = src[off + i + 3];
+                row[i] = (row[i] as f32 * factor).clamp(0.0, 255.0) as u8;
+                row[i + 1] = (row[i + 1] as f32 * factor).clamp(0.0, 255.0) as u8;
+                row[i + 2] = (row[i + 2] as f32 * factor).clamp(0.0, 255.0) as u8;
             }
         });
 
-    ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(w, h, dst)
-        .map(DynamicImage::ImageRgba8)
-        .expect("buffer size matches image dimensions")
+    DynamicImage::ImageRgba8(rgba)
 }
 
 /// Adjusts brightness, leaving alpha untouched.

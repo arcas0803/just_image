@@ -51,6 +51,27 @@ final class JustImage {
     return pipeline.run();
   }
 
+  /// Lightweight one-shot processing through the core ABI.
+  ///
+  /// Supports JPEG, PNG and BMP output. Metadata, ICC profiles, WebP, TIFF,
+  /// watermarks and artistic filters are intentionally not retained.
+  @Deprecated('Tree shaking is automatic; use process().')
+  static Future<ImageResult> processCore(
+    ImageSource source, {
+    int? width,
+    int? height,
+    OutputConfig output = const JpegOutput(),
+  }) async {
+    if ((width == null) != (height == null)) {
+      throw ArgumentError('width and height must be provided together');
+    }
+    var pipeline = ImagePipeline.fromSource(source).encode(output);
+    if (width != null && height != null) {
+      pipeline = pipeline.resize(width, height);
+    }
+    return pipeline.runCore();
+  }
+
   /// Encodes an image into a BlurHash string.
   static Future<String> blurHashEncode(
     ImageSource source, {
@@ -153,7 +174,7 @@ final class JustImage {
             .then((result) {
               results[index] = result;
             })
-            .catchError((e) {
+            .catchError((Object e) {
               errors[index] = e is JustImageException
                   ? e
                   : PipelineExecutionException(e.toString());

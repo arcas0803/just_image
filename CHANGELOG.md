@@ -1,3 +1,53 @@
+## 3.0.0
+
+### Breaking changes
+
+- Requires Dart 3.13 and Flutter 3.47 or newer.
+- Native ABI version increased to 3 for the core, standard and extended pipelines.
+- Auto-orientation, metadata preservation and ICC preservation now default to
+  disabled so basic pipelines can remain in the core native feature group.
+- Arbitrary rotations now expand their canvas by default; pass
+  `canvas: RotationCanvas.clip` for the previous behavior.
+- `OutputFormat` is now a sealed set of constant values rather than a Dart
+  `enum`. Existing `OutputFormat.png`, `.webp`, `values`, `name` and
+  `defaultQuality` usage is preserved; this lets AOT retain only the selected
+  codec implementation.
+- Native release assets now include both dynamic libraries for JIT/debug and
+  static libraries for AOT linking.
+
+### New features
+
+- Generated FFI bindings now use `@RecordUse` and include an automatically
+  generated Dart-to-native symbol mapping.
+- Added a Native Assets link hook that removes unreachable Rust symbols and
+  omits the native library entirely when no FFI APIs are used.
+- Added `ImagePipeline.runCore()` and `JustImage.processCore()` for JPEG, PNG,
+  BMP, transformations, thumbnails and built-in effects without retaining
+  WebP, TIFF, LCMS, metadata, watermarks or artistic filters.
+- Native feature selection is now transparent through `run()`; `runCore()` and
+  `processCore()` are deprecated compatibility helpers.
+- Added AVIF input/output and SVG rasterization through an isolated extended
+  ABI entry point.
+- Added `MetadataPolicy.none`, `.safe` and `.preserveAll`; EXIF reinjection now
+  covers JPEG, PNG, WebP, TIFF and AVIF, and safe mode strips sensitive tags.
+- Added expanded/clipped rotation canvas selection and ARGB background colour.
+- Added explicit PNG compression/filter/optimization, lossless WebP and AVIF
+  speed/thread configurations.
+- Pipeline inputs use `TransferableTypedData` to avoid a second Dart-heap copy
+  when work moves to the background isolate.
+- Added reproducible AOT fixtures and CI verification for exported symbols,
+  complete library omission and core-versus-full binary size.
+
+### Build and release
+
+- Release automation now publishes 24 SHA-256-verified artifacts: a dynamic
+  and a static library for every supported target.
+- JIT and debug builds preserve the full dynamic-library behavior; release/AOT
+  builds consume static archives through `hook/link.dart`.
+- Apple builds isolate Cargo output per target and use the host architecture
+  for build scripts, allowing universal macOS and iOS release builds.
+- Enabled strict casts, inference and raw-type analysis for the package.
+
 ## 2.0.0
 
 ### Breaking changes

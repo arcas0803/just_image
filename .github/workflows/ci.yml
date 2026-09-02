@@ -45,11 +45,18 @@ jobs:
 
       - name: Check Dart
         run: |
+          dart run tool/ffigen.dart
+          git diff --exit-code -- \
+            lib/src/native_bindings.g.dart \
+            lib/src/native_bindings.record_use_mapping.g.dart
           dart format --output=none --set-exit-if-changed \
             lib test hook tool example/cli \
             example/flutter_app/lib example/flutter_app/test
           dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
+
+      - name: Verify native tree shaking
+        run: dart run tool/verify_tree_shaking.dart
 
       - name: Verify independent CLI
         working-directory: example/cli
@@ -93,6 +100,9 @@ jobs:
           dart pub get
           dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
+
+      - name: Verify native tree shaking on host toolchain
+        run: dart run tool/verify_tree_shaking.dart
 
       - name: Run Flutter native smoke test
         working-directory: example/flutter_app

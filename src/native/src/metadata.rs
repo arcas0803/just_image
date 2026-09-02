@@ -1,9 +1,18 @@
 use std::io::Cursor;
 
-/// Datos de metadatos extraídos de una imagen.
+use image::ImageDecoder;
+use img_parts::{Bytes, DynImage, ImageICC};
+use little_exif::exif_tag::ExifTag;
+use little_exif::filetype::FileExtension;
+use little_exif::ifd::ExifTagGroup;
+use little_exif::metadata::Metadata;
+
+use crate::pipeline::{MetadataPolicy, OutputFormat};
+
+/// Metadata decoded once and reused throughout the pipeline.
 #[derive(Debug, Clone)]
 pub struct ImageMetadata {
-    pub exif_data: Option<Vec<u8>>,
+    exif: Option<Metadata>,
     pub icc_profile: Option<Vec<u8>>,
     pub orientation: u16,
 }
@@ -11,224 +20,158 @@ pub struct ImageMetadata {
 impl Default for ImageMetadata {
     fn default() -> Self {
         Self {
-            exif_data: None,
+            exif: None,
             icc_profile: None,
             orientation: 1,
         }
     }
 }
 
-/// Extrae metadatos EXIF del buffer de imagen original.
+/// Extracts EXIF from every container supported by little_exif and ICC from
+/// JPEG, PNG and WebP. Malformed optional metadata never prevents decoding.
 pub fn extract_metadata(data: &[u8]) -> ImageMetadata {
-    let mut meta = ImageMetadata::default();
-
-    // Extraer EXIF con kamadak-exif
-    if let Ok(exif_reader) = exif::Reader::new().read_from_container(&mut Cursor::new(data)) {
-        // Obtener orientación
-        if let Some(orient) = exif_reader.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
-            if let Some(v) = orient.value.get_uint(0) {
-                meta.orientation = v as u16;
-            }
-        }
+    let orientation = exif::Reader::new()
+        .read_from_container(&mut Cursor::new(data))
+        .ok()
+        .and_then(|reader| {
+            reader
+                .get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+                .and_then(|field| field.value.get_uint(0))
+        })
+        .map_or(1, |value| value as u16);
+    let file_type = detect_file_type(data);
+    let exif = file_type.and_then(|kind| Metadata::new_from_vec(&data.to_vec(), kind).ok());
+    let icc_profile = DynImage::from_bytes(Bytes::copy_from_slice(data))
+        .ok()
+        .flatten()
+        .and_then(|image| image.icc_profile())
+        .map(|bytes| bytes.to_vec())
+        .or_else(|| extract_tiff_icc(data));
+    ImageMetadata {
+        exif,
+        icc_profile,
+        orientation,
     }
-
-    // Extraer raw EXIF bytes (APP1 marker en JPEG)
-    meta.exif_data = extract_exif_bytes(data);
-
-    // Extraer perfil ICC (APP2 marker en JPEG)
-    meta.icc_profile = extract_icc_profile(data);
-
-    meta
 }
 
-/// Extrae los bytes EXIF raw de un JPEG (APP1 segment)
-fn extract_exif_bytes(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 4 {
+fn extract_tiff_icc(data: &[u8]) -> Option<Vec<u8>> {
+    let is_tiff = data.starts_with(b"II\x2a\0") || data.starts_with(b"MM\0\x2a");
+    if !is_tiff {
         return None;
     }
-
-    // JPEG: buscar APP1 marker (0xFF 0xE1)
-    if data[0] == 0xFF && data[1] == 0xD8 {
-        let mut pos = 2;
-        while pos + 4 < data.len() {
-            if data[pos] != 0xFF {
-                break;
-            }
-            let marker = data[pos + 1];
-            let seg_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
-
-            if marker == 0xE1 {
-                // APP1 - EXIF
-                let end = (pos + 2 + seg_len).min(data.len());
-                return Some(data[pos..end].to_vec());
-            }
-
-            pos += 2 + seg_len;
-            if marker == 0xDA {
-                break; // Start of scan, no more markers
-            }
-        }
-    }
-
-    // PNG: buscar chunk eXIf
-    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
-        let mut pos = 8;
-        while pos + 12 < data.len() {
-            let chunk_len =
-                u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
-                    as usize;
-            let chunk_type = &data[pos + 4..pos + 8];
-            if chunk_type == b"eXIf" {
-                let start = pos + 8;
-                let end = (start + chunk_len).min(data.len());
-                return Some(data[start..end].to_vec());
-            }
-            pos += 12 + chunk_len;
-        }
-    }
-
-    None
+    let mut decoder = image::codecs::tiff::TiffDecoder::new(Cursor::new(data)).ok()?;
+    decoder.icc_profile().ok().flatten()
 }
 
-/// Extrae el perfil ICC de un JPEG (APP2 segment) o PNG (iCCP chunk)
-fn extract_icc_profile(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 4 {
-        return None;
+/// Writes metadata according to the selected privacy policy. EXIF is written
+/// to JPEG, PNG, WebP, TIFF and AVIF; ICC is written to JPEG, PNG and WebP.
+pub fn inject_metadata(
+    mut encoded: Vec<u8>,
+    metadata: &ImageMetadata,
+    policy: MetadataPolicy,
+    preserve_icc: bool,
+    output_format: OutputFormat,
+    reset_orientation: bool,
+) -> Vec<u8> {
+    if policy != MetadataPolicy::None {
+        if let Some(mut exif) = metadata.exif.clone() {
+            if policy == MetadataPolicy::Safe {
+                remove_sensitive_tags(&mut exif);
+            }
+            if reset_orientation {
+                exif.remove_tag(ExifTag::Orientation(Vec::new()));
+            }
+            if let Some(file_type) = output_file_type(output_format) {
+                let _ = exif.write_to_vec(&mut encoded, file_type);
+            }
+        }
     }
 
-    // JPEG: buscar APP2 marker (0xFF 0xE2) con "ICC_PROFILE"
-    if data[0] == 0xFF && data[1] == 0xD8 {
-        let mut icc_chunks: Vec<(u8, Vec<u8>)> = Vec::new();
-        let mut pos = 2;
-
-        while pos + 4 < data.len() {
-            if data[pos] != 0xFF {
-                break;
-            }
-            let marker = data[pos + 1];
-            let seg_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
-
-            if marker == 0xE2 && seg_len > 14 {
-                let seg_start = pos + 4;
-                let icc_header = b"ICC_PROFILE\0";
-                if seg_start + 14 < data.len() && &data[seg_start..seg_start + 12] == icc_header {
-                    let chunk_num = data[seg_start + 12];
-                    let _total = data[seg_start + 13];
-                    let payload_start = seg_start + 14;
-                    let payload_end = (pos + 2 + seg_len).min(data.len());
-                    if payload_start < payload_end {
-                        icc_chunks.push((chunk_num, data[payload_start..payload_end].to_vec()));
-                    }
+    if preserve_icc {
+        if let Some(profile) = metadata.icc_profile.as_deref() {
+            if let Ok(Some(mut image)) = DynImage::from_bytes(Bytes::from(encoded.clone())) {
+                image.set_icc_profile(Some(Bytes::copy_from_slice(profile)));
+                let mut result = Vec::with_capacity(image.len());
+                if image.encoder().write_to(&mut result).is_ok() {
+                    encoded = result;
                 }
             }
-
-            pos += 2 + seg_len;
-            if marker == 0xDA {
-                break;
-            }
-        }
-
-        if !icc_chunks.is_empty() {
-            icc_chunks.sort_by_key(|(n, _)| *n);
-            let mut profile = Vec::new();
-            for (_, chunk) in icc_chunks {
-                profile.extend_from_slice(&chunk);
-            }
-            return Some(profile);
         }
     }
-
-    // PNG: buscar chunk iCCP
-    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
-        let mut pos = 8;
-        while pos + 12 < data.len() {
-            let chunk_len =
-                u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
-                    as usize;
-            let chunk_type = &data[pos + 4..pos + 8];
-            if chunk_type == b"iCCP" {
-                let start = pos + 8;
-                let end = (start + chunk_len).min(data.len());
-                return Some(data[start..end].to_vec());
-            }
-            pos += 12 + chunk_len;
-        }
-    }
-
-    None
+    encoded
 }
 
-/// Aplica la auto-orientación EXIF a la imagen
+/// Removes location and common device/owner identifiers while retaining
+/// photographic fields such as exposure, lens model and capture date.
+fn remove_sensitive_tags(metadata: &mut Metadata) {
+    for tag in 0x0000..=0x001f {
+        metadata.remove_tag_by_hex_group(tag, ExifTagGroup::GPS);
+    }
+    for (tag, group) in [
+        (0x013b, ExifTagGroup::GENERIC), // Artist
+        (0x927c, ExifTagGroup::EXIF),    // MakerNote
+        (0x9286, ExifTagGroup::EXIF),    // UserComment
+        (0xa420, ExifTagGroup::EXIF),    // ImageUniqueID
+        (0xa430, ExifTagGroup::EXIF),    // OwnerName
+        (0xa431, ExifTagGroup::EXIF),    // SerialNumber
+        (0xa435, ExifTagGroup::EXIF),    // LensSerialNumber
+    ] {
+        metadata.remove_tag_by_hex_group(tag, group);
+    }
+}
+
+fn detect_file_type(data: &[u8]) -> Option<FileExtension> {
+    FileExtension::auto_detect(&mut Cursor::new(data))
+}
+
+fn output_file_type(format: OutputFormat) -> Option<FileExtension> {
+    match format {
+        OutputFormat::Jpeg => Some(FileExtension::JPEG),
+        OutputFormat::Png => Some(FileExtension::PNG {
+            as_zTXt_chunk: false,
+        }),
+        OutputFormat::Webp => Some(FileExtension::WEBP),
+        OutputFormat::Tiff => Some(FileExtension::TIFF),
+        OutputFormat::Avif => Some(FileExtension::HEIF),
+        OutputFormat::Bmp => None,
+    }
+}
+
+/// Applies EXIF orientation and returns pixels in canonical orientation.
 pub fn apply_orientation(img: &image::DynamicImage, orientation: u16) -> image::DynamicImage {
     match orientation {
         2 => img.fliph(),
         3 => img.rotate180(),
         4 => img.flipv(),
-        5 => img.rotate90().fliph(),
+        5 => img.fliph().rotate90(),
         6 => img.rotate90(),
-        7 => img.rotate270().fliph(),
+        7 => img.fliph().rotate270(),
         8 => img.rotate270(),
-        _ => img.clone(), // 1 = normal, o desconocido
+        _ => img.clone(),
     }
 }
 
-/// Re-inyecta EXIF y ICC en un buffer JPEG de salida.
-pub fn inject_metadata_jpeg(
-    output: &[u8],
-    exif_data: Option<&[u8]>,
-    icc_profile: Option<&[u8]>,
-) -> Vec<u8> {
-    if exif_data.is_none() && icc_profile.is_none() {
-        return output.to_vec();
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_policy_removes_identifiers_but_keeps_camera_model() {
+        let mut metadata = Metadata::new();
+        metadata.set_tag(ExifTag::OwnerName("private".into()));
+        metadata.set_tag(ExifTag::SerialNumber("12345".into()));
+        metadata.set_tag(ExifTag::Model("Camera model".into()));
+        remove_sensitive_tags(&mut metadata);
+        assert_eq!(
+            metadata.get_tag(&ExifTag::OwnerName(String::new())).count(),
+            0
+        );
+        assert_eq!(
+            metadata
+                .get_tag(&ExifTag::SerialNumber(String::new()))
+                .count(),
+            0
+        );
+        assert_eq!(metadata.get_tag(&ExifTag::Model(String::new())).count(), 1);
     }
-
-    let mut result = Vec::with_capacity(output.len() + 65536);
-
-    // JPEG debe empezar con SOI (0xFF 0xD8)
-    if output.len() < 2 || output[0] != 0xFF || output[1] != 0xD8 {
-        return output.to_vec();
-    }
-
-    result.push(0xFF);
-    result.push(0xD8);
-
-    // Insertar EXIF (APP1)
-    if let Some(exif) = exif_data {
-        if exif.len() > 2 && exif[0] == 0xFF && exif[1] == 0xE1 {
-            result.extend_from_slice(exif);
-        } else {
-            // Wrap en APP1
-            let len = exif.len() + 2;
-            result.push(0xFF);
-            result.push(0xE1);
-            result.push((len >> 8) as u8);
-            result.push((len & 0xFF) as u8);
-            result.extend_from_slice(exif);
-        }
-    }
-
-    // Insertar ICC (APP2)
-    if let Some(icc) = icc_profile {
-        let header = b"ICC_PROFILE\0";
-        // Fragmentar si > 65519 bytes
-        let max_chunk = 65519 - 14;
-        let total_chunks = icc.len().div_ceil(max_chunk);
-
-        for (i, chunk) in icc.chunks(max_chunk).enumerate() {
-            let seg_len = chunk.len() + 14 + 2;
-            result.push(0xFF);
-            result.push(0xE2);
-            result.push((seg_len >> 8) as u8);
-            result.push((seg_len & 0xFF) as u8);
-            result.extend_from_slice(header);
-            result.push((i + 1) as u8);
-            result.push(total_chunks as u8);
-            result.extend_from_slice(chunk);
-        }
-    }
-
-    // Copiar el resto del JPEG original (saltando SOI)
-    result.extend_from_slice(&output[2..]);
-
-    result
 }

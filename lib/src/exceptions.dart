@@ -118,7 +118,7 @@ class PipelineExecutionException extends JustImageException {
 // Native library errors
 // ─────────────────────────────────────────
 
-/// The native Rust library (.dylib / .so / .dll) could not be loaded.
+/// The native Rust library could not be loaded or linked.
 ///
 /// **Common cause:** the native library has not been compiled, it cannot
 /// be found at the expected path, or there is no compatible binary for

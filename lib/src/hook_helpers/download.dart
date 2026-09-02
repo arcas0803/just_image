@@ -16,22 +16,47 @@ Uri _downloadUri(String fileName) {
   );
 }
 
-/// Returns the platform-specific binary file name for the current target.
-String binaryFileName(String os, String arch, {String? variant}) {
+/// Returns the platform-specific static-library name for the current target.
+String binaryFileName(
+  String os,
+  String arch, {
+  String? variant,
+  bool staticLinking = false,
+}) {
   const base = 'just_image_native';
+  if (!staticLinking) {
+    return switch ((os, arch, variant)) {
+      ('macos', 'arm64', _) => 'lib$base-macos-arm64.dylib',
+      ('macos', 'x64', _) => 'lib$base-macos-x64.dylib',
+      ('ios', 'arm64', 'simulator') => 'lib$base-ios-simulator-arm64.dylib',
+      ('ios', 'x64', 'simulator') => 'lib$base-ios-simulator-x64.dylib',
+      ('ios', 'arm64', _) => 'lib$base-ios-arm64.dylib',
+      ('linux', 'x64', _) => 'lib$base-linux-x64.so',
+      ('linux', 'arm64', _) => 'lib$base-linux-arm64.so',
+      ('windows', 'x64', _) => '$base-windows-x64.dll',
+      ('windows', 'arm64', _) => '$base-windows-arm64.dll',
+      ('android', 'arm64', _) => 'lib$base-android-arm64.so',
+      ('android', 'arm', _) => 'lib$base-android-arm.so',
+      ('android', 'x64', _) => 'lib$base-android-x64.so',
+      _ => throw ArgumentError(
+        'No pre-built binary for '
+        '$os-$arch${variant == null ? '' : '-$variant'}',
+      ),
+    };
+  }
   return switch ((os, arch, variant)) {
-    ('macos', 'arm64', _) => 'lib$base-macos-arm64.dylib',
-    ('macos', 'x64', _) => 'lib$base-macos-x64.dylib',
-    ('ios', 'arm64', 'simulator') => 'lib$base-ios-simulator-arm64.dylib',
-    ('ios', 'x64', 'simulator') => 'lib$base-ios-simulator-x64.dylib',
-    ('ios', 'arm64', _) => 'lib$base-ios-arm64.dylib',
-    ('linux', 'x64', _) => 'lib$base-linux-x64.so',
-    ('linux', 'arm64', _) => 'lib$base-linux-arm64.so',
-    ('windows', 'x64', _) => '$base-windows-x64.dll',
-    ('windows', 'arm64', _) => '$base-windows-arm64.dll',
-    ('android', 'arm64', _) => 'lib$base-android-arm64.so',
-    ('android', 'arm', _) => 'lib$base-android-arm.so',
-    ('android', 'x64', _) => 'lib$base-android-x64.so',
+    ('macos', 'arm64', _) => 'lib$base-macos-arm64.a',
+    ('macos', 'x64', _) => 'lib$base-macos-x64.a',
+    ('ios', 'arm64', 'simulator') => 'lib$base-ios-simulator-arm64.a',
+    ('ios', 'x64', 'simulator') => 'lib$base-ios-simulator-x64.a',
+    ('ios', 'arm64', _) => 'lib$base-ios-arm64.a',
+    ('linux', 'x64', _) => 'lib$base-linux-x64.a',
+    ('linux', 'arm64', _) => 'lib$base-linux-arm64.a',
+    ('windows', 'x64', _) => '$base-windows-x64.lib',
+    ('windows', 'arm64', _) => '$base-windows-arm64.lib',
+    ('android', 'arm64', _) => 'lib$base-android-arm64.a',
+    ('android', 'arm', _) => 'lib$base-android-arm.a',
+    ('android', 'x64', _) => 'lib$base-android-x64.a',
     _ => throw ArgumentError(
       'No pre-built binary for $os-$arch${variant == null ? '' : '-$variant'}',
     ),
@@ -51,9 +76,15 @@ Future<File> downloadBinary({
   required String os,
   required String arch,
   String? variant,
+  bool staticLinking = false,
   required Directory outputDir,
 }) async {
-  final fileName = binaryFileName(os, arch, variant: variant);
+  final fileName = binaryFileName(
+    os,
+    arch,
+    variant: variant,
+    staticLinking: staticLinking,
+  );
   final uri = _downloadUri(fileName);
   final expectedHash = binaryHashes[fileName];
 

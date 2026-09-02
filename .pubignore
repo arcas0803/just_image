@@ -1,4 +1,7 @@
 src/native/target/
+build/
+.dart_tool/
+pubspec.lock
 example/images/
 example/output/
 example/cli/thumbnail.webp

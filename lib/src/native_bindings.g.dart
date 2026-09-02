@@ -14,12 +14,17 @@ library;
 
 import 'dart:ffi' as ffi;
 
+import 'package:meta/meta.dart' as meta;
+
+@meta.RecordUse()
 @ffi.Native<ffi.Uint32 Function()>(isLeaf: true)
 external int rust_abi_version();
 
+@meta.RecordUse()
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>()
 external ffi.Pointer<ffi.Char> rust_available_filters();
 
+@meta.RecordUse()
 @ffi.Native<FfiResult Function(ffi.Pointer<ffi.Char>, ffi.Uint32, ffi.Uint32)>()
 external FfiResult rust_blurhash_decode(
   ffi.Pointer<ffi.Char> hash_ptr,
@@ -27,6 +32,7 @@ external FfiResult rust_blurhash_decode(
   int height,
 );
 
+@meta.RecordUse()
 @ffi.Native<
   FfiResult Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Uint32, ffi.Uint32)
 >()
@@ -37,21 +43,54 @@ external FfiResult rust_blurhash_encode(
   int components_y,
 );
 
+@meta.RecordUse()
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
 external void rust_free_buffer(ffi.Pointer<ffi.Uint8> ptr, int len);
 
+@meta.RecordUse()
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Char>)>(isLeaf: true)
 external void rust_free_error(ffi.Pointer<ffi.Char> ptr);
 
+@meta.RecordUse()
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Char>)>(isLeaf: true)
 external void rust_free_string(ffi.Pointer<ffi.Char> ptr);
 
+@meta.RecordUse()
 @ffi.Native<FfiResult Function(ffi.Pointer<ffi.Uint8>, ffi.Size)>()
 external FfiResult rust_image_info(
   ffi.Pointer<ffi.Uint8> input_ptr,
   int input_len,
 );
 
+@meta.RecordUse()
+@ffi.Native<
+  FfiResult Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Char>)
+>()
+external FfiResult rust_process_core_pipeline(
+  ffi.Pointer<ffi.Uint8> input_ptr,
+  int input_len,
+  ffi.Pointer<ffi.Char> config_json,
+);
+
+@meta.RecordUse()
+@ffi.Native<
+  FfiResult Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+  )
+>()
+external FfiResult rust_process_extended_pipeline(
+  ffi.Pointer<ffi.Uint8> input_ptr,
+  int input_len,
+  ffi.Pointer<ffi.Char> config_json,
+  ffi.Pointer<ffi.Uint8> watermark_ptr,
+  int watermark_len,
+);
+
+@meta.RecordUse()
 @ffi.Native<
   FfiResult Function(
     ffi.Pointer<ffi.Uint8>,
@@ -69,6 +108,7 @@ external FfiResult rust_process_pipeline(
   int watermark_len,
 );
 
+@meta.RecordUse()
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>()
 external ffi.Pointer<ffi.Char> rust_version();
 

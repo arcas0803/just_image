@@ -3,7 +3,7 @@
 //! These helpers centralise the repetitive `to_rgba8 -> parallel rows ->
 //! ImageBuffer` pattern used by effects and filters.
 
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::DynamicImage;
 use rayon::prelude::*;
 
 /// Applies a per-pixel transformation to an RGBA image in parallel.
@@ -14,31 +14,12 @@ pub fn map_rgba<F>(img: &DynamicImage, f: F) -> DynamicImage
 where
     F: Fn([u8; 4]) -> [u8; 4] + Sync + Send,
 {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let src = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
-    let row_stride = w as usize * 4;
-
-    dst.par_chunks_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let off = y * row_stride;
-            for i in (0..row.len()).step_by(4) {
-                let px = [
-                    src[off + i],
-                    src[off + i + 1],
-                    src[off + i + 2],
-                    src[off + i + 3],
-                ];
-                let out = f(px);
-                row[i..i + 4].copy_from_slice(&out);
-            }
-        });
-
-    ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(w, h, dst)
-        .map(DynamicImage::ImageRgba8)
-        .expect("buffer size matches image dimensions")
+    let mut rgba = img.to_rgba8();
+    rgba.as_mut().par_chunks_mut(4).for_each(|pixel| {
+        let output = f([pixel[0], pixel[1], pixel[2], pixel[3]]);
+        pixel.copy_from_slice(&output);
+    });
+    DynamicImage::ImageRgba8(rgba)
 }
 
 /// Applies a per-pixel transformation to the RGB channels, leaving alpha
@@ -47,28 +28,12 @@ pub fn map_rgb<F>(img: &DynamicImage, f: F) -> DynamicImage
 where
     F: Fn([u8; 3]) -> [u8; 3] + Sync + Send,
 {
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let src = rgba.as_raw();
-    let mut dst = vec![0u8; src.len()];
-    let row_stride = w as usize * 4;
-
-    dst.par_chunks_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let off = y * row_stride;
-            for i in (0..row.len()).step_by(4) {
-                let rgb = f([src[off + i], src[off + i + 1], src[off + i + 2]]);
-                row[i] = rgb[0];
-                row[i + 1] = rgb[1];
-                row[i + 2] = rgb[2];
-                row[i + 3] = src[off + i + 3];
-            }
-        });
-
-    ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(w, h, dst)
-        .map(DynamicImage::ImageRgba8)
-        .expect("buffer size matches image dimensions")
+    let mut rgba = img.to_rgba8();
+    rgba.as_mut().par_chunks_mut(4).for_each(|pixel| {
+        let rgb = f([pixel[0], pixel[1], pixel[2]]);
+        pixel[..3].copy_from_slice(&rgb);
+    });
+    DynamicImage::ImageRgba8(rgba)
 }
 
 /// Linearly interpolates two byte values.

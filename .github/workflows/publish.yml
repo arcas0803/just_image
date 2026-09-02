@@ -22,18 +22,26 @@ jobs:
             target: aarch64-apple-darwin
             source: libjust_image_native.dylib
             artifact: libjust_image_native-macos-arm64.dylib
+            static_source: libjust_image_native.a
+            static_artifact: libjust_image_native-macos-arm64.a
           - os: macos-15-intel
             target: x86_64-apple-darwin
             source: libjust_image_native.dylib
             artifact: libjust_image_native-macos-x64.dylib
+            static_source: libjust_image_native.a
+            static_artifact: libjust_image_native-macos-x64.a
           - os: windows-2025
             target: x86_64-pc-windows-msvc
             source: just_image_native.dll
             artifact: just_image_native-windows-x64.dll
+            static_source: just_image_native.lib
+            static_artifact: just_image_native-windows-x64.lib
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
             source: just_image_native.dll
             artifact: just_image_native-windows-arm64.dll
+            static_source: just_image_native.lib
+            static_artifact: just_image_native-windows-arm64.lib
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -52,10 +60,12 @@ jobs:
           mkdir -p release-assets
           cp "src/native/target/${{ matrix.target }}/release/${{ matrix.source }}" \
             "release-assets/${{ matrix.artifact }}"
+          cp "src/native/target/${{ matrix.target }}/release/${{ matrix.static_source }}" \
+            "release-assets/${{ matrix.static_artifact }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: release-assets/${{ matrix.artifact }}
+          path: release-assets/*
           retention-days: 1
           compression-level: 9
           if-no-files-found: error
@@ -69,16 +79,18 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact: libjust_image_native-linux-x64.so
+            static_artifact: libjust_image_native-linux-x64.a
           - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: libjust_image_native-linux-arm64.so
+            static_artifact: libjust_image_native-linux-arm64.a
     runs-on: ${{ matrix.os }}
     container: ubuntu:20.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Install build prerequisites
-        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates curl git pkg-config
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates cmake curl git pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -89,6 +101,8 @@ jobs:
           mkdir -p ../../release-assets
           cp "target/${{ matrix.target }}/release/libjust_image_native.so" \
             "../../release-assets/${{ matrix.artifact }}"
+          cp "target/${{ matrix.target }}/release/libjust_image_native.a" \
+            "../../release-assets/${{ matrix.static_artifact }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -127,13 +141,19 @@ jobs:
             cargo build --locked --release --target aarch64-apple-ios
             cp target/aarch64-apple-ios/release/libjust_image_native.dylib \
               ../../release-assets/libjust_image_native-ios-arm64.dylib
+            cp target/aarch64-apple-ios/release/libjust_image_native.a \
+              ../../release-assets/libjust_image_native-ios-arm64.a
             cargo build --locked --release --target aarch64-apple-ios-sim
             cp target/aarch64-apple-ios-sim/release/libjust_image_native.dylib \
               ../../release-assets/libjust_image_native-ios-simulator-arm64.dylib
+            cp target/aarch64-apple-ios-sim/release/libjust_image_native.a \
+              ../../release-assets/libjust_image_native-ios-simulator-arm64.a
           else
             cargo build --locked --release --target x86_64-apple-ios
             cp target/x86_64-apple-ios/release/libjust_image_native.dylib \
               ../../release-assets/libjust_image_native-ios-simulator-x64.dylib
+            cp target/x86_64-apple-ios/release/libjust_image_native.a \
+              ../../release-assets/libjust_image_native-ios-simulator-x64.a
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -179,6 +199,8 @@ jobs:
                 --manifest-path src/native/Cargo.toml --target "$target"
             cp "src/native/target/$target/release/libjust_image_native.so" \
               "release-assets/libjust_image_native-android-$arch.so"
+            cp "src/native/target/$target/release/libjust_image_native.a" \
+              "release-assets/libjust_image_native-android-$arch.a"
           done
       - uses: actions/upload-artifact@v4
         with:
