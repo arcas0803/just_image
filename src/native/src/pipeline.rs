@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 /// Passed from Dart as serialized JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
+    /// Explicit input format for codecs that are intentionally kept out of
+    /// the lightweight auto-detect path.
+    #[serde(default)]
+    pub input_format: InputFormat,
     /// Output image format.
     pub output_format: OutputFormat,
     /// Compression quality (1-100).
@@ -12,8 +16,29 @@ pub struct PipelineConfig {
     pub auto_orient: bool,
     /// Preserve EXIF metadata.
     pub preserve_metadata: bool,
+    /// Fine-grained metadata policy used by the v3 API.
+    #[serde(default)]
+    pub metadata_policy: MetadataPolicy,
     /// Preserve ICC colour profile.
     pub preserve_icc: bool,
+    /// SVG raster width. The intrinsic aspect ratio is retained when only one
+    /// dimension is specified.
+    #[serde(default)]
+    pub svg_width: Option<u32>,
+    #[serde(default)]
+    pub svg_height: Option<u32>,
+    #[serde(default)]
+    pub png_compression: PngCompression,
+    #[serde(default)]
+    pub png_filter: PngFilter,
+    #[serde(default)]
+    pub png_optimization: u8,
+    #[serde(default)]
+    pub webp_lossless: bool,
+    #[serde(default = "default_avif_speed")]
+    pub avif_speed: u8,
+    #[serde(default)]
+    pub avif_threads: Option<usize>,
     /// Ordered list of operations to apply.
     pub operations: Vec<Operation>,
 }
@@ -21,17 +46,36 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
+            input_format: InputFormat::Auto,
             output_format: OutputFormat::Jpeg,
             quality: 90,
             auto_orient: true,
             preserve_metadata: true,
+            metadata_policy: MetadataPolicy::PreserveAll,
             preserve_icc: true,
+            svg_width: None,
+            svg_height: None,
+            png_compression: PngCompression::Balanced,
+            png_filter: PngFilter::Adaptive,
+            png_optimization: 0,
+            webp_lossless: false,
+            avif_speed: default_avif_speed(),
+            avif_threads: None,
             operations: Vec::new(),
         }
     }
 }
 
 impl PipelineConfig {
+    /// Resolves the v2 boolean into the v3 policy for older callers.
+    pub fn effective_metadata_policy(&self) -> MetadataPolicy {
+        if self.metadata_policy == MetadataPolicy::None && self.preserve_metadata {
+            MetadataPolicy::PreserveAll
+        } else {
+            self.metadata_policy
+        }
+    }
+
     /// Validates values received over FFI before allocating image buffers.
     pub fn validate(&self) -> Result<(), String> {
         if !(1..=100).contains(&self.quality) {
@@ -39,6 +83,26 @@ impl PipelineConfig {
                 "quality must be between 1 and 100, got {}",
                 self.quality
             ));
+        }
+        if self.png_optimization > 6 {
+            return Err(format!(
+                "png_optimization must be between 0 and 6, got {}",
+                self.png_optimization
+            ));
+        }
+        if !(1..=10).contains(&self.avif_speed) {
+            return Err(format!(
+                "avif_speed must be between 1 and 10, got {}",
+                self.avif_speed
+            ));
+        }
+        if self.avif_threads == Some(0) {
+            return Err("avif_threads must be positive".into());
+        }
+        if matches!(self.input_format, InputFormat::Svg)
+            && (self.svg_width == Some(0) || self.svg_height == Some(0))
+        {
+            return Err("SVG raster dimensions must be positive".into());
         }
 
         for operation in &self.operations {
@@ -85,7 +149,7 @@ impl PipelineConfig {
                         "watermark opacity must be between 0 and 1, got {opacity}"
                     ));
                 }
-                Operation::Rotate { degrees } if !degrees.is_finite() => {
+                Operation::Rotate { degrees, .. } if !degrees.is_finite() => {
                     return Err("rotation must be finite".into());
                 }
                 _ => {}
@@ -93,6 +157,62 @@ impl PipelineConfig {
         }
         Ok(())
     }
+}
+
+const fn default_avif_speed() -> u8 {
+    6
+}
+
+/// Input codecs that require the extended native entry point.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InputFormat {
+    #[default]
+    Auto,
+    Avif,
+    Svg,
+}
+
+/// Metadata retention and privacy policy.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataPolicy {
+    #[default]
+    None,
+    Safe,
+    PreserveAll,
+}
+
+/// PNG compression effort.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PngCompression {
+    Fast,
+    #[default]
+    Balanced,
+    Best,
+}
+
+/// PNG scanline filtering strategy.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PngFilter {
+    #[default]
+    Adaptive,
+    None,
+    Sub,
+    Up,
+    Average,
+    Paeth,
+}
+
+/// Canvas behavior for arbitrary rotations.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RotationCanvas {
+    Clip,
+    #[default]
+    Expand,
 }
 
 fn require_dimensions(width: u32, height: u32) -> Result<(), String> {
@@ -111,6 +231,7 @@ pub enum OutputFormat {
     Webp,
     Tiff,
     Bmp,
+    Avif,
 }
 
 impl OutputFormat {
@@ -122,6 +243,7 @@ impl OutputFormat {
             Self::Webp => "webp",
             Self::Tiff => "tiff",
             Self::Bmp => "bmp",
+            Self::Avif => "avif",
         }
     }
 }
@@ -204,7 +326,13 @@ pub enum Operation {
         height: u32,
     },
     #[serde(rename = "rotate")]
-    Rotate { degrees: f64 },
+    Rotate {
+        degrees: f64,
+        #[serde(default)]
+        canvas: RotationCanvas,
+        #[serde(default)]
+        background: u32,
+    },
     #[serde(rename = "flip_horizontal")]
     FlipHorizontal,
     #[serde(rename = "flip_vertical")]

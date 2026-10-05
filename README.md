@@ -9,24 +9,29 @@ edit Gradle or CMake files, add CocoaPods, or copy dynamic libraries.
 
 ## Features
 
-- Decode and encode JPEG, PNG, WebP, TIFF and BMP.
+- Decode and encode JPEG, PNG, WebP, TIFF, BMP and AVIF; rasterize SVG input.
 - Resize, crop, rotate, flip and create aspect-preserving thumbnails.
 - Blur, sharpen, Sobel edge detection, brightness, contrast and HSL changes.
 - Apply 15 built-in artistic filters.
 - Composite an image watermark with position and opacity.
 - Encode and decode BlurHash placeholders.
 - Read image dimensions without running a transformation pipeline.
-- Auto-orient from EXIF and preserve JPEG EXIF/ICC data.
+- Auto-orient from EXIF and preserve EXIF/ICC data with an optional privacy-safe policy.
 - Process batches concurrently while keeping per-image successes and errors.
 - Run CPU-heavy work in a background Dart isolate.
 - Download and verify the correct precompiled native binary automatically.
+- Tree-shake unused Rust entry points and optional native feature groups in
+  Dart 3.13 release builds.
 
 ## Requirements
 
-- Dart 3.10.8 or newer.
-- Flutter 3.38 or newer for Flutter applications.
+- Dart 3.13 or newer.
+- Flutter 3.47 or newer for Flutter applications.
 - The normal SDK/toolchain for the platform targeted by a Flutter app, such as
   Xcode for iOS or the Android SDK for Android.
+- A C linker for standalone Dart release/AOT builds (normally Clang, GCC or
+  the Visual Studio toolchain). Flutter supplies the corresponding linker via
+  Xcode, the Android NDK or Visual Studio.
 - Network access to GitHub Releases on the first build. The verified binary is
   cached for subsequent builds.
 
@@ -34,7 +39,7 @@ edit Gradle or CMake files, add CocoaPods, or copy dynamic libraries.
 
 ```yaml
 dependencies:
-  just_image: ^2.0.0
+  just_image: ^3.0.0
 ```
 
 No additional consumer configuration is required.
@@ -63,6 +68,42 @@ Future<void> main() async {
 loads the source asynchronously and executes native processing in a background
 isolate.
 
+## Transparent native tree shaking
+
+Release/AOT builds use Dart 3.13 recorded usages to retain only the native FFI
+entry points reached by the application. If no native API is used, the Rust
+library is omitted from the bundle entirely.
+
+Use the normal `run()` API. The immutable pipeline records which native group
+is required while it is built and dispatches internally:
+
+```dart
+final result = await imageBytes.justImage
+    .resize(1280, 720)
+    .brightness(0.05)
+    .encode(OutputFormat.png)
+    .run();
+```
+
+JPEG/PNG/BMP and basic operations stay in the core group; WebP/TIFF,
+EXIF/ICC, watermarks and filters select the standard group; AVIF/SVG select
+the extended group. Typed output configurations and explicit AVIF/SVG input
+constructors make that choice visible to Dart's tree shaker without requiring
+a separate execution method. The deprecated `runCore()` and `processCore()`
+remain only as migration aids.
+
+Reference macOS arm64 AOT measurement for this release:
+
+| Reachable group | Native bundle |
+|---|---:|
+| Core | 1,924,992 bytes |
+| Standard | 4,097,520 bytes |
+| Extended | 9,875,952 bytes |
+
+Core is 53.0% smaller than standard in that build. Exact sizes vary by target
+and linker; CI rebuilds all four fixtures and verifies symbol isolation and
+ordering on every change.
+
 ## Image sources
 
 Use raw bytes, `dart:io` files, `cross_file` files or an explicit source:
@@ -74,6 +115,8 @@ ImagePipeline.xfile(xFile);
 ImagePipeline.fromSource(BytesSource(imageBytes));
 ImagePipeline.fromSource(FileSource(File('photo.jpg')));
 ImagePipeline.fromSource(XFileSource(xFile));
+ImagePipeline.avif(BytesSource(avifBytes));
+ImagePipeline.svg(BytesSource(svgBytes), width: 1200);
 ```
 
 `Uint8List`, `File` and `XFile` also expose the `.justImage` extension.
@@ -86,6 +129,7 @@ pipeline.encode(OutputFormat.png);
 pipeline.encode(OutputFormat.webp, quality: 85);
 pipeline.encode(OutputFormat.tiff);
 pipeline.encode(OutputFormat.bmp);
+pipeline.encode(OutputFormat.avif);
 ```
 
 | Format | Decode | Encode | Default quality |
@@ -95,16 +139,25 @@ pipeline.encode(OutputFormat.bmp);
 | WebP | Yes | Yes | 90 |
 | TIFF | Yes | Yes | 100 |
 | BMP | Yes | Yes | 100 |
+| AVIF | Yes | Yes | 80 |
+| SVG | Rasterize | No | — |
 
-The typed `JpegOutput`, `PngOutput`, `WebpOutput`, `TiffOutput` and `BmpOutput`
-classes remain available:
+Typed configurations expose codec-specific controls:
 
 ```dart
-pipeline.encode(const WebpOutput(quality: 85));
+pipeline.encode(const PngOutput(
+  compression: PngCompression.best,
+  filter: PngFilter.adaptive,
+  optimizationLevel: 4,
+));
+pipeline.encode(const WebpOutput.lossless());
+pipeline.encode(const AvifOutput(quality: 80, speed: 6, threads: 4));
 ```
 
-Quality must be between 1 and 100. For PNG, a value below 100 enables an
-additional optimization pass; TIFF and BMP are lossless formats.
+Quality must be between 1 and 100. PNG `optimizationLevel` ranges from 0 to 6;
+AVIF `speed` ranges from 1 (smallest/slower) to 10 (fastest). TIFF and BMP are
+lossless formats. `WebpOutput.lossless()` explicitly selects lossless WebP;
+quality 100 retains the v2 lossless behavior for compatibility.
 
 ## Transformations
 
@@ -112,7 +165,7 @@ additional optimization pass; TIFF and BMP are lossless formats.
 final result = await imageBytes.justImage
     .resize(1600, 900)          // Exact dimensions, Lanczos3.
     .crop(100, 50, 1200, 700)  // x, y, width, height.
-    .rotate(12.5)               // Degrees; arbitrary angles are accepted.
+    .rotate(12.5)               // Expands the canvas; no clipped corners.
     .flipHorizontal()
     .flipVertical()
     .thumbnail(400, 300)        // Fits inside the box; preserves ratio.
@@ -123,6 +176,17 @@ final result = await imageBytes.justImage
 Crop coordinates must remain inside the current image bounds. `resize()` uses
 the exact requested dimensions and can change the aspect ratio; `thumbnail()`
 does not upscale and preserves it.
+
+Arbitrary rotations expand the canvas by default. To preserve the old clipped
+canvas, or select a fill colour, configure the operation explicitly:
+
+```dart
+pipeline.rotate(
+  12.5,
+  canvas: RotationCanvas.clip,
+  background: 0xff202020, // ARGB.
+);
+```
 
 ## Effects and colour
 
@@ -242,20 +306,24 @@ memory available to the application.
 
 ## Orientation, EXIF and colour profiles
 
-These options default to `true`:
+These options default to disabled so an ordinary JPEG/PNG/BMP pipeline remains
+in the smallest native group. Enabling one upgrades the pipeline automatically:
 
 ```dart
 final result = await imageBytes.justImage
     .autoOrient(true)
-    .preserveMetadata(true)
+    .metadataPolicy(MetadataPolicy.safe)
     .preserveIcc(true)
     .encode(OutputFormat.jpeg)
     .run();
 ```
 
-EXIF orientation is applied when present. Raw EXIF and ICC reinjection is
-implemented for JPEG output. Other output formats retain processed pixels but
-do not currently receive the original metadata blocks.
+`MetadataPolicy.none` strips metadata. `safe` retains useful photographic EXIF
+while removing GPS, owner/device serials, image identifiers, user comments and
+MakerNote. `preserveAll` retains supported EXIF including GPS; the legacy
+`preserveMetadata(true)` maps to this policy. EXIF is written to JPEG, PNG,
+WebP, TIFF and AVIF. ICC profiles are retained for JPEG, PNG, WebP and TIFF. When
+auto-orientation changes pixels, the output orientation tag is cleared.
 
 ## Errors and validation
 
@@ -301,21 +369,20 @@ entry below.
 
 ## Limitations
 
-- AVIF, HEIC/HEIF, GIF, SVG, RAW camera formats and animated images are not
-  supported.
+- HEIC/HEIF, GIF, RAW camera formats and animated images are not supported.
 - Flutter Web, Fuchsia, Alpine/musl and 32-bit desktop systems are not
   supported.
 - Linux binaries target glibc 2.31 or newer; musl-based distributions need a
   future dedicated build.
-- Processing is in memory. Large images and high batch concurrency can require
-  substantial RAM; there is no streaming/tiled decoder.
+- Processing is in memory and does not provide streaming/tiled decoding. Input
+  buffers are transferred to the worker isolate without a second Dart-heap
+  copy and intermediate native buffers are released between operations, but
+  large images and high batch concurrency can still require substantial RAM.
 - Output animation is not supported; every result is a single raster image.
-- Metadata preservation is limited to JPEG EXIF and ICC output blocks. GPS or
-  other sensitive EXIF data is preserved when `preserveMetadata(true)` is used.
-- Rotation by non-right angles keeps the original canvas size, can clip the
-  corners and introduces transparent pixels in newly exposed areas.
-- WebP quality 100 selects lossless encoding. PNG quality below 100 controls an
-  optimization pass rather than visual quality.
+- XMP preservation and AVIF ICC preservation are not yet guaranteed. SVG is
+  rasterized to a single image and its vector structure is not preserved.
+- `preserveMetadata(true)` intentionally preserves GPS; use
+  `metadataPolicy(MetadataPolicy.safe)` to remove sensitive EXIF fields.
 - The first build requires access to the package's GitHub Releases. Offline
   first-time installation is not supported.
 
@@ -332,11 +399,19 @@ package configuration.
 
 ## Native binary delivery
 
-Release automation compiles 12 native binaries, publishes them as immutable
+Android binaries support 4 KB and 16 KB memory pages. Both local Rust builds
+and the release link hook apply 16 KB linker alignment. Release CI checks
+LOAD and GNU_RELRO alignment before publication and verifies the final
+Flutter release library and APK packaging.
+
+Release automation compiles 12 dynamic and 12 static native libraries,
+publishes them as immutable
 GitHub Release assets and embeds their SHA-256 hashes in the pub.dev package.
-The Native Assets build hook chooses the correct target, verifies the download,
-caches it by version and registers it with Dart or Flutter. Temporary GitHub
-Actions artifacts are retained for one day and deleted after publication.
+The Native Assets build hook chooses the correct target, verifies the download
+and caches it by version. JIT/debug commands load the dynamic library directly;
+AOT/release commands send the static library to the link hook so unreachable
+native symbols can be removed. Temporary GitHub Actions artifacts are retained
+for one day and deleted after publication.
 
 When developing this package itself, maintainers can opt into a local Cargo
 build with Native Assets user defines:

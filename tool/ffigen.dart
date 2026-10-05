@@ -9,10 +9,15 @@ void main() {
   final packageRoot = Platform.script.resolve('../');
   final header = packageRoot.resolve('src/native/include/just_image.h');
   final bindings = packageRoot.resolve('lib/src/native_bindings.g.dart');
+  final recordUseMapping = packageRoot.resolve(
+    'lib/src/native_bindings.record_use_mapping.g.dart',
+  );
 
   const functions = {
     'rust_abi_version',
     'rust_process_pipeline',
+    'rust_process_core_pipeline',
+    'rust_process_extended_pipeline',
     'rust_free_buffer',
     'rust_free_error',
     'rust_version',
@@ -27,6 +32,7 @@ void main() {
     headers: Headers(entryPoints: [header]),
     functions: Functions(
       include: (declaration) => functions.contains(declaration.originalName),
+      recordUse: (_) => true,
       isLeaf: (declaration) =>
           declaration.originalName.startsWith('rust_free_') ||
           declaration.originalName == 'rust_abi_version',
@@ -34,6 +40,7 @@ void main() {
     structs: Structs.includeSet({'FfiResult'}),
     output: Output(
       dartFile: bindings,
+      recordUseMapping: recordUseMapping,
       style: const NativeExternalBindings(
         assetId: 'package:just_image/src/native_bindings.g.dart',
       ),

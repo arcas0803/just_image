@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -34,7 +35,13 @@ jobs:
           cache: false
 
       - name: Resolve dependencies
-        run: dart pub get
+        run: |
+          dart pub get
+          (cd example/cli && dart pub get)
+          (cd example/flutter_app && flutter pub get)
+
+      - name: Test Android ELF verifier
+        run: python3 tool/verify_android_elf_test.py
 
       - name: Check Rust
         working-directory: src/native
@@ -45,11 +52,18 @@ jobs:
 
       - name: Check Dart
         run: |
+          dart run tool/ffigen.dart
+          git diff --exit-code -- \
+            lib/src/native_bindings.g.dart \
+            lib/src/native_bindings.record_use_mapping.g.dart
           dart format --output=none --set-exit-if-changed \
             lib test hook tool example/cli \
             example/flutter_app/lib example/flutter_app/test
           dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
+
+      - name: Verify native tree shaking
+        run: dart run tool/verify_tree_shaking.dart
 
       - name: Verify independent CLI
         working-directory: example/cli
@@ -82,6 +96,7 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: subosito/flutter-action@v2
         with:
@@ -93,6 +108,9 @@ jobs:
           dart pub get
           dart analyze --fatal-infos lib test hook tool
           dart test --chain-stack-traces
+
+      - name: Verify native tree shaking on host toolchain
+        run: dart run tool/verify_tree_shaking.dart
 
       - name: Run Flutter native smoke test
         working-directory: example/flutter_app

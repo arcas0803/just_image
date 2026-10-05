@@ -19,11 +19,43 @@ void main() {
       expect(info.height, 6);
     });
 
+    test('core ABI processes JPEG, PNG and BMP operations', () async {
+      for (final format in [
+        OutputFormat.jpeg,
+        OutputFormat.png,
+        OutputFormat.bmp,
+      ]) {
+        final result = await ImagePipeline.bytes(source)
+            .resize(6, 4)
+            .brightness(0.05)
+            .encode(format)
+            .runCore();
+        expect(result.width, 6);
+        expect(result.height, 4);
+        expect(result.format.name, format.name);
+        expect(result.data, isNotEmpty);
+      }
+    });
+
+    test('core ABI rejects feature groups that require the full engine', () {
+      expect(
+        ImagePipeline.bytes(source).encode(OutputFormat.webp).runCore,
+        throwsUnsupportedError,
+      );
+      expect(
+        ImagePipeline.bytes(source)
+            .filter(ArtisticFilterName.cinematic)
+            .runCore,
+        throwsUnsupportedError,
+      );
+    });
+
     for (final format in OutputFormat.values) {
       test('encodes a real ${format.name} image', () async {
-        final result = await ImagePipeline.bytes(
-          source,
-        ).resize(4, 3).encode(format).run();
+        final result = await ImagePipeline.bytes(source)
+            .resize(4, 3)
+            .encode(format)
+            .run();
 
         expect(result.width, 4);
         expect(result.height, 3);
@@ -35,6 +67,46 @@ void main() {
         expect(decoded.height, 3);
       });
     }
+
+    test(
+      'decodes AVIF input through the transparent extended pipeline',
+      () async {
+        final avif = await ImagePipeline.bytes(source)
+            .encode(const AvifOutput(speed: 10))
+            .run();
+        final png = await ImagePipeline.avif(BytesSource(avif.data))
+            .encode(const PngOutput())
+            .run();
+        expect((png.width, png.height), (8, 6));
+        expect(png.data, isNotEmpty);
+      },
+    );
+
+    test('rasterizes SVG input at an explicit size', () async {
+      final svg = Uint8List.fromList(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">'
+                '<rect width="20" height="10" fill="#ff0000"/></svg>'
+            .codeUnits,
+      );
+      final result = await ImagePipeline.svg(
+        BytesSource(svg),
+        width: 40,
+      ).encode(const PngOutput()).run();
+      expect((result.width, result.height), (40, 20));
+    });
+
+    test('arbitrary rotation expands or clips the canvas explicitly', () async {
+      final expanded = await ImagePipeline.bytes(source)
+          .rotate(45)
+          .encode(const PngOutput())
+          .run();
+      final clipped = await ImagePipeline.bytes(source)
+          .rotate(45, canvas: RotationCanvas.clip)
+          .encode(const PngOutput())
+          .run();
+      expect(expanded.width, greaterThan(clipped.width));
+      expect(expanded.height, greaterThan(clipped.height));
+    });
 
     test('executes transforms, effects and a filter', () async {
       final result = await ImagePipeline.bytes(source)
@@ -80,9 +152,9 @@ void main() {
 
     test('returns a typed error for invalid image bytes', () {
       expect(
-        ImagePipeline.bytes(
-          Uint8List.fromList([1, 2, 3]),
-        ).encode(OutputFormat.png).run,
+        ImagePipeline.bytes(Uint8List.fromList([1, 2, 3]))
+            .encode(OutputFormat.png)
+            .run,
         throwsA(isA<ImageDecodeException>()),
       );
     });
@@ -90,9 +162,8 @@ void main() {
     test('batch preserves successes and native failures', () async {
       final batch = await JustImage.processBatch([
         ImagePipeline.bytes(source).encode(OutputFormat.png),
-        ImagePipeline.bytes(
-          Uint8List.fromList([1, 2, 3]),
-        ).encode(OutputFormat.png),
+        ImagePipeline.bytes(Uint8List.fromList([1, 2, 3]))
+            .encode(OutputFormat.png),
         ImagePipeline.bytes(source).resize(2, 2).encode(OutputFormat.webp),
       ], concurrency: 2);
 

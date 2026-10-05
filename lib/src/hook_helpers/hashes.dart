@@ -6,26 +6,40 @@
 // To update: run `dart run tool/generate_hashes.dart` after a release and
 // commit the result.
 
-const String binaryVersion = '2.0.0';
+const String binaryVersion = '3.0.0';
 const String binaryReleaseTag = 'v$binaryVersion';
 
 const Map<String, String> binaryHashes = {
-  // macOS
+  // Dynamic libraries are used by JIT and debug commands without link hooks.
   'libjust_image_native-macos-arm64.dylib': 'PENDING',
   'libjust_image_native-macos-x64.dylib': 'PENDING',
-  // iOS device and simulators are distinct build targets but keep a stable
-  // library basename once bundled by Native Assets.
   'libjust_image_native-ios-arm64.dylib': 'PENDING',
   'libjust_image_native-ios-simulator-arm64.dylib': 'PENDING',
   'libjust_image_native-ios-simulator-x64.dylib': 'PENDING',
-  // Linux
   'libjust_image_native-linux-x64.so': 'PENDING',
   'libjust_image_native-linux-arm64.so': 'PENDING',
-  // Windows
   'just_image_native-windows-x64.dll': 'PENDING',
   'just_image_native-windows-arm64.dll': 'PENDING',
-  // Android
   'libjust_image_native-android-arm64.so': 'PENDING',
   'libjust_image_native-android-arm.so': 'PENDING',
   'libjust_image_native-android-x64.so': 'PENDING',
+  // Static libraries are consumed by the release/AOT link hook.
+  // macOS
+  'libjust_image_native-macos-arm64.a': 'PENDING',
+  'libjust_image_native-macos-x64.a': 'PENDING',
+  // iOS device and simulators are distinct build targets but keep a stable
+  // library basename once bundled by Native Assets.
+  'libjust_image_native-ios-arm64.a': 'PENDING',
+  'libjust_image_native-ios-simulator-arm64.a': 'PENDING',
+  'libjust_image_native-ios-simulator-x64.a': 'PENDING',
+  // Linux
+  'libjust_image_native-linux-x64.a': 'PENDING',
+  'libjust_image_native-linux-arm64.a': 'PENDING',
+  // Windows
+  'just_image_native-windows-x64.lib': 'PENDING',
+  'just_image_native-windows-arm64.lib': 'PENDING',
+  // Android
+  'libjust_image_native-android-arm64.a': 'PENDING',
+  'libjust_image_native-android-arm.a': 'PENDING',
+  'libjust_image_native-android-x64.a': 'PENDING',
 };

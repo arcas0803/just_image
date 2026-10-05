@@ -24,3 +24,6 @@ example/cli/thumbnail.webp
 # Agent tooling
 .agents/
 skills-lock.json
+
+# Python verification tools
+__pycache__/

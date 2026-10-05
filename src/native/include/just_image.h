@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define JUST_IMAGE_ABI_VERSION 1
+#define JUST_IMAGE_ABI_VERSION 3
 
 typedef struct FfiResult {
   uint8_t *data;
@@ -26,6 +26,14 @@ FfiResult rust_process_pipeline(const uint8_t *input_ptr, size_t input_len,
                                 const char *config_json,
                                 const uint8_t *watermark_ptr,
                                 size_t watermark_len);
+FfiResult rust_process_core_pipeline(const uint8_t *input_ptr,
+                                     size_t input_len,
+                                     const char *config_json);
+FfiResult rust_process_extended_pipeline(const uint8_t *input_ptr,
+                                         size_t input_len,
+                                         const char *config_json,
+                                         const uint8_t *watermark_ptr,
+                                         size_t watermark_len);
 void rust_free_buffer(uint8_t *ptr, size_t len);
 void rust_free_error(char *ptr);
 char *rust_version(void);

@@ -23,7 +23,7 @@ use crate::transforms;
 use crate::watermark;
 
 /// ABI version shared with the generated Dart bindings.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 3;
 
 // ──────────────────────────────────────────────
 // FFI result struct
@@ -196,19 +196,197 @@ unsafe fn process_pipeline(
     run_pipeline(input_data, &config, watermark_ptr, watermark_len)
 }
 
+/// Processes a pipeline that can decode SVG/AVIF and encode AVIF.
+///
+/// This symbol is separate so release builds that never reach it can discard
+/// the extended codec graph.
+///
+/// # Safety
+/// - `input_ptr` must point to `input_len` valid bytes.
+/// - `config_json` must be a valid UTF-8 C string.
+/// - `watermark_ptr` may be null when `watermark_len` is zero.
+#[no_mangle]
+pub unsafe extern "C" fn rust_process_extended_pipeline(
+    input_ptr: *const u8,
+    input_len: usize,
+    config_json: *const c_char,
+    watermark_ptr: *const u8,
+    watermark_len: usize,
+) -> FfiResult {
+    ffi_boundary(|| {
+        if input_ptr.is_null() || input_len == 0 {
+            return Err(NativeError::InvalidInput(
+                "Null or empty input buffer".into(),
+            ));
+        }
+        if config_json.is_null() {
+            return Err(NativeError::InvalidInput("Null config JSON".into()));
+        }
+        let input_data = slice::from_raw_parts(input_ptr, input_len);
+        let config_str = CStr::from_ptr(config_json).to_str()?;
+        let config: PipelineConfig = serde_json::from_str(config_str)?;
+        config.validate().map_err(NativeError::InvalidInput)?;
+        run_extended_pipeline(input_data, &config, watermark_ptr, watermark_len)
+    })
+}
+
+/// Processes the tree-shakeable core pipeline.
+///
+/// This ABI intentionally has no references to TIFF, WebP, LCMS, metadata,
+/// watermarks or artistic filters. Applications that only call this entry
+/// point allow the native linker to discard those feature groups.
+///
+/// # Safety
+/// - `input_ptr` must point to `input_len` valid bytes.
+/// - `config_json` must be a valid UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn rust_process_core_pipeline(
+    input_ptr: *const u8,
+    input_len: usize,
+    config_json: *const c_char,
+) -> FfiResult {
+    ffi_boundary(|| process_core_pipeline(input_ptr, input_len, config_json))
+}
+
+unsafe fn process_core_pipeline(
+    input_ptr: *const u8,
+    input_len: usize,
+    config_json: *const c_char,
+) -> NativeResult<(Vec<u8>, u32, u32)> {
+    if input_ptr.is_null() || input_len == 0 {
+        return Err(NativeError::InvalidInput(
+            "Null or empty input buffer".to_string(),
+        ));
+    }
+    if config_json.is_null() {
+        return Err(NativeError::InvalidInput("Null config JSON".to_string()));
+    }
+
+    let input_data = slice::from_raw_parts(input_ptr, input_len);
+    let config_str = CStr::from_ptr(config_json).to_str()?;
+    let config: PipelineConfig = serde_json::from_str(config_str)?;
+    config.validate().map_err(NativeError::InvalidInput)?;
+
+    let mut img = formats::decode_core_image(input_data).map_err(NativeError::Decode)?;
+    for operation in &config.operations {
+        img = apply_core_operation(&img, operation)?;
+    }
+    let (width, height) = img.dimensions();
+    let encoded = formats::encode_core_format(&img, &config).map_err(NativeError::Encode)?;
+    Ok((encoded, width, height))
+}
+
+fn apply_core_operation(
+    img: &image::DynamicImage,
+    operation: &Operation,
+) -> NativeResult<image::DynamicImage> {
+    let result = match operation {
+        Operation::Resize { width, height } => transforms::resize_lanczos3(img, *width, *height),
+        Operation::Crop {
+            x,
+            y,
+            width,
+            height,
+        } => {
+            let right = x.checked_add(*width);
+            let bottom = y.checked_add(*height);
+            if right.is_none_or(|right| right > img.width())
+                || bottom.is_none_or(|bottom| bottom > img.height())
+            {
+                return Err(NativeError::Pipeline(format!(
+                    "Crop ({x}, {y}, {width}, {height}) exceeds image bounds {}x{}",
+                    img.width(),
+                    img.height()
+                )));
+            }
+            transforms::crop(img, *x, *y, *width, *height)
+        }
+        Operation::Rotate {
+            degrees,
+            canvas,
+            background,
+        } => transforms::rotate(img, *degrees, *canvas, *background),
+        Operation::FlipHorizontal => transforms::flip_horizontal(img),
+        Operation::FlipVertical => transforms::flip_vertical(img),
+        Operation::GaussianBlur { sigma } => effects::gaussian_blur(img, *sigma),
+        Operation::UnsharpMask { amount, threshold } => {
+            effects::unsharp_mask(img, *amount, *threshold)
+        }
+        Operation::Sobel => effects::sobel_edges(img),
+        Operation::Brightness { value } => effects::adjust_brightness(img, *value),
+        Operation::Contrast { value } => effects::adjust_contrast(img, *value),
+        Operation::HslAdjust {
+            hue,
+            saturation,
+            lightness,
+        } => effects::adjust_hsl(img, *hue, *saturation, *lightness),
+        Operation::Thumbnail {
+            max_width,
+            max_height,
+        } => thumbnail::generate_thumbnail(img, *max_width, *max_height),
+        Operation::Watermark { .. } | Operation::Filter { .. } => {
+            return Err(NativeError::Pipeline(
+                "Watermarks and artistic filters require the full pipeline".to_string(),
+            ));
+        }
+    };
+    Ok(result)
+}
+
 fn run_pipeline(
     input_data: &[u8],
     config: &PipelineConfig,
     watermark_ptr: *const u8,
     watermark_len: usize,
 ) -> NativeResult<(Vec<u8>, u32, u32)> {
-    let meta = if config.preserve_metadata || config.auto_orient || config.preserve_icc {
+    let img = formats::decode_image(input_data).map_err(NativeError::Decode)?;
+    finish_pipeline(
+        img,
+        input_data,
+        config,
+        watermark_ptr,
+        watermark_len,
+        formats::encode_to_format,
+    )
+}
+
+fn run_extended_pipeline(
+    input_data: &[u8],
+    config: &PipelineConfig,
+    watermark_ptr: *const u8,
+    watermark_len: usize,
+) -> NativeResult<(Vec<u8>, u32, u32)> {
+    let img = formats::decode_extended_image(input_data, config).map_err(NativeError::Decode)?;
+    finish_pipeline(
+        img,
+        input_data,
+        config,
+        watermark_ptr,
+        watermark_len,
+        formats::encode_extended_format,
+    )
+}
+
+fn finish_pipeline<F>(
+    mut img: image::DynamicImage,
+    input_data: &[u8],
+    config: &PipelineConfig,
+    watermark_ptr: *const u8,
+    watermark_len: usize,
+    encode: F,
+) -> NativeResult<(Vec<u8>, u32, u32)>
+where
+    F: FnOnce(&image::DynamicImage, &PipelineConfig, Option<&[u8]>) -> Result<Vec<u8>, String>,
+{
+    let metadata_policy = config.effective_metadata_policy();
+    let meta = if metadata_policy != crate::pipeline::MetadataPolicy::None
+        || config.auto_orient
+        || config.preserve_icc
+    {
         metadata::extract_metadata(input_data)
     } else {
         metadata::ImageMetadata::default()
     };
-
-    let mut img = formats::decode_image(input_data).map_err(NativeError::Decode)?;
 
     if config.auto_orient && meta.orientation > 1 {
         img = metadata::apply_orientation(&img, meta.orientation);
@@ -237,26 +415,21 @@ fn run_pipeline(
     }
 
     let (w, h) = img.dimensions();
-    let mut encoded = formats::encode_to_format(&img, config.output_format, config.quality)
-        .map_err(NativeError::Encode)?;
+    let output_icc = if config.preserve_icc {
+        meta.icc_profile.as_deref()
+    } else {
+        None
+    };
+    let mut encoded = encode(&img, config, output_icc).map_err(NativeError::Encode)?;
 
-    if config.output_format == OutputFormat::Jpeg
-        && (config.preserve_metadata || config.preserve_icc)
-    {
-        encoded = metadata::inject_metadata_jpeg(
-            &encoded,
-            if config.preserve_metadata {
-                meta.exif_data.as_deref()
-            } else {
-                None
-            },
-            if config.preserve_icc {
-                meta.icc_profile.as_deref()
-            } else {
-                None
-            },
-        );
-    }
+    encoded = metadata::inject_metadata(
+        encoded,
+        &meta,
+        metadata_policy,
+        config.preserve_icc,
+        config.output_format,
+        config.auto_orient,
+    );
 
     Ok((encoded, w, h))
 }
@@ -288,7 +461,11 @@ fn apply_operation(
             }
             transforms::crop(img, *x, *y, *width, *height)
         }
-        Operation::Rotate { degrees } => transforms::rotate(img, *degrees),
+        Operation::Rotate {
+            degrees,
+            canvas,
+            background,
+        } => transforms::rotate(img, *degrees, *canvas, *background),
         Operation::FlipHorizontal => transforms::flip_horizontal(img),
         Operation::FlipVertical => transforms::flip_vertical(img),
         Operation::GaussianBlur { sigma } => effects::gaussian_blur(img, *sigma),
@@ -400,7 +577,8 @@ unsafe fn image_info(input_ptr: *const u8, input_len: usize) -> NativeResult<(Ve
         ));
     }
     let input_data = slice::from_raw_parts(input_ptr, input_len);
-    let img = formats::decode_image(input_data).map_err(NativeError::Decode)?;
+    let img = formats::decode_extended_image(input_data, &PipelineConfig::default())
+        .map_err(NativeError::Decode)?;
     let (w, h) = img.dimensions();
     let info = serde_json::json!({"width": w, "height": h});
     Ok((info.to_string().into_bytes(), w, h))
@@ -443,7 +621,8 @@ unsafe fn blurhash_encode(
     }
 
     let input_data = slice::from_raw_parts(input_ptr, input_len);
-    let img = formats::decode_image(input_data).map_err(NativeError::Decode)?;
+    let img = formats::decode_extended_image(input_data, &PipelineConfig::default())
+        .map_err(NativeError::Decode)?;
     let hash = blurhash_bridge::encode_blurhash(&img, components_x, components_y)
         .map_err(NativeError::Encode)?;
     let (w, h) = img.dimensions();
@@ -482,8 +661,12 @@ unsafe fn blurhash_decode(
     let hash_str = CStr::from_ptr(hash_ptr).to_str()?;
     let img =
         blurhash_bridge::decode_blurhash(hash_str, width, height).map_err(NativeError::Decode)?;
-    let png_bytes =
-        formats::encode_to_format(&img, OutputFormat::Png, 100).map_err(NativeError::Encode)?;
+    let png_config = PipelineConfig {
+        output_format: OutputFormat::Png,
+        quality: 100,
+        ..PipelineConfig::default()
+    };
+    let png_bytes = formats::encode_core_format(&img, &png_config).map_err(NativeError::Encode)?;
     Ok((png_bytes, width, height))
 }
 
