@@ -191,10 +191,21 @@ jobs:
             IFS=: read -r target compiler arch <<< "$spec"
             target_env=$(echo "$target" | tr '[:lower:]-' '[:upper:]_')
             cc_env=$(echo "$target" | tr '-' '_')
+            case "$arch" in
+              arm64) abi=arm64-v8a ;;
+              arm) abi=armeabi-v7a ;;
+              x64) abi=x86_64 ;;
+            esac
+            cmake_toolchain="$RUNNER_TEMP/android-$arch.cmake"
+            cat > "$cmake_toolchain" <<EOF
+          set(ANDROID_ABI "$abi" CACHE STRING "" FORCE)
+          set(ANDROID_PLATFORM "android-24" CACHE STRING "" FORCE)
+          include("$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake")
+          EOF
             env \
               "CC_$cc_env=$toolchain/$compiler" \
               "CXX_$cc_env=$toolchain/${compiler/clang/clang++}" \
-              "CMAKE_TOOLCHAIN_FILE_$cc_env=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+              "CMAKE_TOOLCHAIN_FILE_$cc_env=$cmake_toolchain" \
               "AR_$cc_env=$toolchain/llvm-ar" \
               "CARGO_TARGET_${target_env}_LINKER=$toolchain/$compiler" \
               "CARGO_ENCODED_RUSTFLAGS=$(printf -- '-C\037link-arg=-Wl,-z,max-page-size=16384\037-C\037link-arg=-Wl,-z,common-page-size=16384')" \

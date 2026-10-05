@@ -93,6 +93,29 @@ Future<void> _compileWithCargo({
   _isolateCargoTargetDirectory(env, input.outputDirectoryShared, targetTriple);
   if (codeConfig.targetOS == OS.android) {
     applyAndroidPageSizeFlags(env);
+    // The NDK CMake toolchain defaults to armeabi-v7a unless ANDROID_ABI
+    // is explicit. Keep these settings target-specific for Cargo build scripts.
+    final key = 'CMAKE_TOOLCHAIN_FILE_${_ccTargetEnv(targetTriple)}';
+    final toolchain = env[key];
+    if (toolchain != null) {
+      final abi = switch (codeConfig.targetArchitecture) {
+        Architecture.arm64 => 'arm64-v8a',
+        Architecture.arm => 'armeabi-v7a',
+        Architecture.x64 => 'x86_64',
+        _ => throw BuildError(message: 'Unsupported Android architecture'),
+      };
+      final wrapper = File.fromUri(
+        input.outputDirectory.resolve('android_toolchain.cmake'),
+      );
+      await wrapper.parent.create(recursive: true);
+      await wrapper.writeAsString(
+        'set(ANDROID_ABI "$abi" CACHE STRING "" FORCE)\n'
+        'set(ANDROID_PLATFORM "android-${codeConfig.android.targetNdkApi}" '
+        'CACHE STRING "" FORCE)\n'
+        'include("${toolchain.replaceAll(r"\", "/")}")\n',
+      );
+      env[key] = wrapper.path;
+    }
   }
   if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
     final appleEnv = await _appleEnv(
@@ -628,7 +651,13 @@ void _applyAndroidCCompilerConfig(
   env['CXX_$ccTarget'] = _cxxFromCompiler(targetCompiler);
   env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = targetCompiler;
-  final ndkHome = _findNdkHome();
+  // Use the same NDK as Native Assets, rather than a different installed NDK.
+  final toolchainMarker =
+      '${Platform.pathSeparator}toolchains${Platform.pathSeparator}';
+  final markerIndex = compiler.indexOf(toolchainMarker);
+  final ndkHome = markerIndex < 0
+      ? _findNdkHome()
+      : compiler.substring(0, markerIndex);
   if (ndkHome != null) {
     _applyAndroidCmakeToolchain(env, ndkHome, target);
   }
