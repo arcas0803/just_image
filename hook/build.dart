@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:just_image/src/hook_helpers/download.dart';
+import 'package:just_image/src/hook_helpers/android.dart';
 
 const _baseName = 'just_image_native';
 
@@ -90,6 +91,9 @@ Future<void> _compileWithCargo({
 }) async {
   final env = await _cargoEnv(codeConfig);
   _isolateCargoTargetDirectory(env, input.outputDirectoryShared, targetTriple);
+  if (codeConfig.targetOS == OS.android) {
+    applyAndroidPageSizeFlags(env);
+  }
   if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
     final appleEnv = await _appleEnv(
       codeConfig,
@@ -108,6 +112,7 @@ Future<void> _compileWithCargo({
 
   final cargoArgs = <String>[
     'build',
+    '--locked',
     ...profileArgs,
     '--target',
     targetTriple,

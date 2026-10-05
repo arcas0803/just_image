@@ -214,7 +214,7 @@ fn decode_svg(
     let transform = resvg::tiny_skia::Transform::from_scale(width as f32 / iw, height as f32 / ih);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     let mut bytes = pixmap.take();
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         let alpha = pixel[3] as u32;
         if alpha > 0 && alpha < 255 {
             for channel in &mut pixel[..3] {

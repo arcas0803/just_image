@@ -399,6 +399,11 @@ package configuration.
 
 ## Native binary delivery
 
+Android binaries support 4 KB and 16 KB memory pages. Both local Rust builds
+and the release link hook apply 16 KB linker alignment. Release CI checks
+LOAD and GNU_RELRO alignment before publication and verifies the final
+Flutter release library and APK packaging.
+
 Release automation compiles 12 dynamic and 12 static native libraries,
 publishes them as immutable
 GitHub Release assets and embeds their SHA-256 hashes in the pub.dev package.

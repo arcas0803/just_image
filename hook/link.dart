@@ -4,6 +4,7 @@
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:just_image/src/native_bindings.record_use_mapping.g.dart';
+import 'package:just_image/src/hook_helpers/android.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 import 'package:record_use/record_use.dart';
 
@@ -31,6 +32,7 @@ Future<void> main(List<String> arguments) async {
       assetName: _assetName,
       sources: staticLibraries,
       libraries: _nativeLibraries(os),
+      flags: os == OS.android ? androidPageSizeLinkerFlags : const [],
       linkModePreference: LinkModePreference.dynamic,
       linkerOptions: LinkerOptions.treeshake(symbolsToKeep: symbolsToKeep),
     ).run(input: input, output: output);

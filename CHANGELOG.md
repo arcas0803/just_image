@@ -40,6 +40,11 @@
 
 ### Build and release
 
+- Android builds explicitly align LOAD and GNU_RELRO segments for 16 KB pages,
+  in both Cargo builds and the final AOT link hook. Release CI verifies Android
+  ELF alignment and builds the Flutter APK/AAB from published static archives.
+- Android prebuilt binaries use NDK r28c.
+
 - Release automation now publishes 24 SHA-256-verified artifacts: a dynamic
   and a static library for every supported target.
 - JIT and debug builds preserve the full dynamic-library behavior; release/AOT

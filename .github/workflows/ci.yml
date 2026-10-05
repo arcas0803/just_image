@@ -36,6 +36,9 @@ jobs:
       - name: Resolve dependencies
         run: dart pub get
 
+      - name: Test Android ELF verifier
+        run: python3 tool/verify_android_elf_test.py
+
       - name: Check Rust
         working-directory: src/native
         run: |

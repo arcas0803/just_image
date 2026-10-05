@@ -106,7 +106,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: release-assets/${{ matrix.artifact }}
+          path: release-assets/*
           retention-days: 1
           compression-level: 9
           if-no-files-found: error
@@ -175,7 +175,7 @@ jobs:
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
-          ndk-version: r27c
+          ndk-version: r28c
       - name: Build Android binaries
         shell: bash
         env:
@@ -193,8 +193,11 @@ jobs:
             cc_env=$(echo "$target" | tr '-' '_')
             env \
               "CC_$cc_env=$toolchain/$compiler" \
+              "CXX_$cc_env=$toolchain/${compiler/clang/clang++}" \
+              "CMAKE_TOOLCHAIN_FILE_$cc_env=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
               "AR_$cc_env=$toolchain/llvm-ar" \
               "CARGO_TARGET_${target_env}_LINKER=$toolchain/$compiler" \
+              "CARGO_ENCODED_RUSTFLAGS=$(printf -- '-C\037link-arg=-Wl,-z,max-page-size=16384\037-C\037link-arg=-Wl,-z,common-page-size=16384')" \
               cargo build --locked --release \
                 --manifest-path src/native/Cargo.toml --target "$target"
             cp "src/native/target/$target/release/libjust_image_native.so" \
@@ -202,6 +205,8 @@ jobs:
             cp "src/native/target/$target/release/libjust_image_native.a" \
               "release-assets/libjust_image_native-android-$arch.a"
           done
+      - name: Verify Android ELF alignment
+        run: python3 tool/verify_android_elf.py release-assets/libjust_image_native-android-*.so
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -280,6 +285,9 @@ jobs:
           (cd example/cli && dart pub get && dart analyze && dart run bin/main.dart --output="$RUNNER_TEMP/just_image.webp")
           test -s "$RUNNER_TEMP/just_image.webp"
           (cd example/flutter_app && flutter pub get && flutter analyze && flutter test)
+          (cd example/flutter_app && flutter build apk --release && flutter build appbundle --release)
+          python3 tool/verify_android_elf.py example/flutter_app/build/app/intermediates/stripped_native_libs/release/stripReleaseDebugSymbols/out/lib/*/libjust_image_native.so
+          "$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -1)" -c -P 16 4 example/flutter_app/build/app/outputs/flutter-apk/app-release.apk
           dart pub publish --dry-run
 
       - name: Publish to pub.dev
