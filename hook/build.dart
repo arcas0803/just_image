@@ -4,9 +4,11 @@
 // dynamic library directly. AOT/release commands receive a static library via
 // hook/link.dart, which prunes symbols that Dart 3.13 proved unreachable.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
+import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:just_image/src/hook_helpers/download.dart';
 import 'package:just_image/src/hook_helpers/android.dart';
@@ -211,6 +213,19 @@ void _isolateCargoTargetDirectory(
   String targetTriple,
 ) {
   final configuredRoot = env['CARGO_TARGET_DIR'];
+  if (configuredRoot == null && Platform.isWindows) {
+    // MSBuild's file tracker still has a MAX_PATH limit. The nested Native
+    // Assets/Cargo/CMake output path exceeds it for libaom. Use a short,
+    // project- and target-specific temporary root for local Windows builds.
+    final key = sha256
+        .convert(utf8.encode('$outputDirectoryShared$targetTriple'))
+        .toString()
+        .substring(0, 12);
+    env['CARGO_TARGET_DIR'] = Directory.systemTemp.uri
+        .resolve('ji-$key/')
+        .toFilePath();
+    return;
+  }
   final targetRoot = configuredRoot == null
       ? outputDirectoryShared.resolve('cargo/$targetTriple/').toFilePath()
       : Directory(configuredRoot).absolute.uri

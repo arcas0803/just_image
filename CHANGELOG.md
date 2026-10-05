@@ -44,6 +44,8 @@
   in both Cargo builds and the final AOT link hook. Release CI verifies Android
   ELF alignment and builds the Flutter APK/AAB from published static archives.
 - Android prebuilt binaries use NDK r28c.
+- AVIF builds explicitly select the Android ABI; Windows local builds use a
+  shorter Cargo output path to avoid MSBuild file tracking limits.
 
 - Release automation now publishes 24 SHA-256-verified artifacts: a dynamic
   and a static library for every supported target.
