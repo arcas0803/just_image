@@ -269,7 +269,9 @@ jobs:
         shell: bash
         run: |
           dart pub get
-          dart run tool/generate_hashes.dart release-assets "${GITHUB_REF_NAME#v}"
+          # Run the utility directly: `dart run` would invoke our native hook
+          # before these hashes exist and bootstrap a needless Cargo build.
+          dart --packages=.dart_tool/package_config.json tool/generate_hashes.dart release-assets "${GITHUB_REF_NAME#v}"
           sha256sum release-assets/* > release-assets/SHA256SUMS
           ! grep -q PENDING lib/src/hook_helpers/hashes.dart
           git config user.name github-actions
@@ -310,7 +312,7 @@ jobs:
 
   cleanup:
     name: Delete temporary artifacts
-    if: always()
+    if: ${{ always() && needs.publish.result == 'success' }}
     needs: [desktop, linux, ios, android, publish]
     runs-on: ubuntu-22.04
     permissions:
