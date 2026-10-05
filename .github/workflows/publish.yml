@@ -151,7 +151,8 @@ jobs:
             cp target/aarch64-apple-ios-sim/release/libjust_image_native.a \
               ../../release-assets/libjust_image_native-ios-simulator-arm64.a
           else
-            cargo build --locked --release --target x86_64-apple-ios
+            CMAKE_TOOLCHAIN_FILE_x86_64_apple_ios="$PWD/cmake/ios-simulator-x64.cmake" \
+              cargo build --locked --release --target x86_64-apple-ios
             cp target/x86_64-apple-ios/release/libjust_image_native.dylib \
               ../../release-assets/libjust_image_native-ios-simulator-x64.dylib
             cp target/x86_64-apple-ios/release/libjust_image_native.a \

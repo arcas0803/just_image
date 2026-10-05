@@ -44,6 +44,7 @@
   in both Cargo builds and the final AOT link hook. Release CI verifies Android
   ELF alignment and builds the Flutter APK/AAB from published static archives.
 - Android prebuilt binaries use NDK r28c.
+- iOS x64 simulator AVIF assembly uses Mach-O objects and the simulator SDK.
 - LCMS is always built into native artifacts so release consumers do not
   depend on a system-installed color management library.
 - AVIF builds explicitly select the Android ABI; Windows local builds use a

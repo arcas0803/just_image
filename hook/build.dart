@@ -126,6 +126,12 @@ Future<void> _compileWithCargo({
       input.outputDirectory,
     );
     env.addAll(appleEnv);
+    if (codeConfig.targetOS == OS.iOS &&
+        codeConfig.targetArchitecture == Architecture.x64) {
+      env['CMAKE_TOOLCHAIN_FILE_x86_64_apple_ios'] = crateDir
+          .resolve('cmake/ios-simulator-x64.cmake')
+          .toFilePath();
+    }
   }
 
   await _ensureRustTarget(targetTriple);
@@ -192,6 +198,7 @@ Future<void> _compileWithCargo({
   output.dependencies.addAll([
     crateDir.resolve('Cargo.toml'),
     crateDir.resolve('Cargo.lock'),
+    crateDir.resolve('cmake/ios-simulator-x64.cmake'),
     ...Directory.fromUri(crateDir.resolve('src/'))
         .listSync(recursive: true)
         .whereType<File>()

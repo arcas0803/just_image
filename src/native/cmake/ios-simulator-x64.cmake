@@ -1,0 +1,20 @@
+# libaom selects NASM's object format from CMAKE_SYSTEM_NAME. CMake's iOS
+# name incorrectly selects ELF; Darwin selects Mach-O. The explicit target
+# and simulator SDK below retain the correct iOS platform and deployment ABI.
+set(CMAKE_SYSTEM_NAME Darwin)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_OSX_ARCHITECTURES x86_64 CACHE STRING "" FORCE)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "" FORCE)
+execute_process(
+  COMMAND xcrun --sdk iphonesimulator --show-sdk-path
+  OUTPUT_VARIABLE JUST_IMAGE_SIMULATOR_SDK
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  COMMAND_ERROR_IS_FATAL ANY
+)
+set(CMAKE_OSX_SYSROOT "${JUST_IMAGE_SIMULATOR_SDK}" CACHE PATH "" FORCE)
+set(JUST_IMAGE_IOS_MIN "$ENV{IPHONEOS_DEPLOYMENT_TARGET}")
+if(NOT JUST_IMAGE_IOS_MIN)
+  set(JUST_IMAGE_IOS_MIN "13.0")
+endif()
+set(CMAKE_C_COMPILER_TARGET "x86_64-apple-ios${JUST_IMAGE_IOS_MIN}-simulator" CACHE STRING "" FORCE)
+set(CMAKE_CXX_COMPILER_TARGET "${CMAKE_C_COMPILER_TARGET}" CACHE STRING "" FORCE)
