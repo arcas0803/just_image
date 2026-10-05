@@ -174,7 +174,6 @@ void main() {
           .encode(const WebpOutput(quality: 80));
       expect(pipeline, isA<ImagePipeline>());
     });
-
   });
 
   group('ArtisticFilterName', () {
