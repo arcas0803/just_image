@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -92,6 +93,7 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: subosito/flutter-action@v2
         with:

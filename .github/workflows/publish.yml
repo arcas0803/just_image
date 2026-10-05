@@ -48,6 +48,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '10.15'
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -90,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install build prerequisites
-        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates cmake curl git pkg-config
+        run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ca-certificates cmake curl git nasm pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -129,6 +130,7 @@ jobs:
       IPHONEOS_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.targets }}
@@ -169,6 +171,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
