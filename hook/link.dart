@@ -67,6 +67,7 @@ List<String> _nativeLibraries(OS os) => switch (os) {
     'bcrypt',
     'kernel32',
     'ntdll',
+    'synchronization',
     'userenv',
     'ws2_32',
   ],
