@@ -32,7 +32,13 @@ Future<void> main(List<String> arguments) async {
       assetName: _assetName,
       sources: staticLibraries,
       libraries: _nativeLibraries(os),
-      flags: os == OS.android ? androidPageSizeLinkerFlags : const [],
+      flags: [
+        if (os == OS.android) ...androidPageSizeLinkerFlags,
+        // Match build.rs when linking the Rust archive into an AOT bundle.
+        if ((os == OS.android || os == OS.linux) &&
+            input.config.code.targetArchitecture == Architecture.x64)
+          '-Wl,-Bsymbolic',
+      ],
       linkModePreference: LinkModePreference.dynamic,
       linkerOptions: LinkerOptions.treeshake(symbolsToKeep: symbolsToKeep),
     ).run(input: input, output: output);

@@ -156,6 +156,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn oriented_jpeg_preserves_icc_and_resets_exif_after_rotation() {
+        let mut source = image::RgbImage::new(4, 2);
+        source.put_pixel(0, 0, image::Rgb([255, 0, 0]));
+        let mut encoded = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut encoded)
+            .encode_image(&source)
+            .unwrap();
+        let mut exif = Metadata::new();
+        exif.set_tag(ExifTag::Orientation(vec![6]));
+        exif.write_to_vec(&mut encoded, FileExtension::JPEG)
+            .unwrap();
+        let mut metadata = extract_metadata(&encoded);
+        assert_eq!(metadata.orientation, 6);
+        let rotated = apply_orientation(&source.into(), metadata.orientation).to_rgb8();
+        assert_eq!(rotated.dimensions(), (2, 4));
+        assert_eq!(rotated.get_pixel(1, 0).0, [255, 0, 0]);
+
+        metadata.icc_profile = Some(lcms2::Profile::new_srgb().icc().unwrap());
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode_image(&rotated)
+            .unwrap();
+        let output = inject_metadata(
+            jpeg,
+            &metadata,
+            MetadataPolicy::Safe,
+            true,
+            OutputFormat::Jpeg,
+            true,
+        );
+        let reread = extract_metadata(&output);
+        assert_eq!(reread.orientation, 1);
+        assert_eq!(reread.icc_profile, metadata.icc_profile);
+    }
+
+    #[test]
     fn safe_policy_removes_identifiers_but_keeps_camera_model() {
         let mut metadata = Metadata::new();
         metadata.set_tag(ExifTag::OwnerName("private".into()));

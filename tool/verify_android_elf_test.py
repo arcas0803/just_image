@@ -22,6 +22,10 @@ class VerifyTest(unittest.TestCase):
         for machine, is64 in [(183, True), (62, True), (40, False)]:
             self.assertEqual(verify(elf(machine=machine, is64=is64)), 1)
 
+    def test_rejects_an_elf_packaged_for_another_abi(self):
+        with self.assertRaisesRegex(ValueError, 'packaged ABI'):
+            verify(elf(machine=183), expected_machine=62)
+
     def test_rejects_4kb_load(self):
         with self.assertRaisesRegex(ValueError, 'LOAD'):
             verify(elf(alignment=4096))

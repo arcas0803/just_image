@@ -8,3 +8,4 @@ example/cli/thumbnail.webp
 .agents/
 skills-lock.json
 tool/
+example/pdfrx/

@@ -288,14 +288,21 @@ mod tests {
     }
 
     #[test]
-    fn avif_round_trip_preserves_dimensions() {
+    fn avif_round_trip_preserves_dimensions_and_alpha() {
         let config = PipelineConfig {
             output_format: OutputFormat::Avif,
             ..PipelineConfig::default()
         };
-        let bytes = encode_extended_format(&sample(), &config, None).unwrap();
+        let mut source = sample().to_rgba8();
+        for (x, _, pixel) in source.enumerate_pixels_mut() {
+            pixel[3] = if x < 4 { 0 } else { 255 };
+        }
+        let bytes = encode_extended_format(&source.into(), &config, None).unwrap();
         let decoded = decode_avif(&bytes).unwrap();
         assert_eq!(decoded.dimensions(), (8, 6));
+        assert!(decoded.get_pixel(0, 0)[3] < 8);
+        assert!(decoded.get_pixel(7, 5)[3] > 247);
+        assert!(decode_avif(&bytes[..12]).is_err());
     }
 
     #[test]
@@ -303,6 +310,33 @@ mod tests {
         let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#;
         let decoded = decode_svg(svg, Some(40), None).unwrap();
         assert_eq!(decoded.dimensions(), (40, 20));
+    }
+
+    #[test]
+    fn png_optimization_shrinks_a_flat_image_without_changing_pixels() {
+        let source = DynamicImage::ImageRgba8(ImageBuffer::from_fn(128, 128, |x, _| {
+            Rgba([255, 0, 0, if x < 64 { 128 } else { 255 }])
+        }));
+        let config = PipelineConfig {
+            output_format: OutputFormat::Png,
+            quality: 100,
+            png_compression: PngCompression::Fast,
+            ..PipelineConfig::default()
+        };
+        let original = encode_core_format(&source, &config).unwrap();
+        let optimized = encode_core_format(
+            &source,
+            &PipelineConfig {
+                png_optimization: 2,
+                ..config
+            },
+        )
+        .unwrap();
+        assert!(optimized.len() < original.len());
+        assert_eq!(
+            decode_image(&optimized).unwrap().to_rgba8(),
+            source.to_rgba8()
+        );
     }
 
     #[test]

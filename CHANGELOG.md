@@ -1,3 +1,9 @@
+## 3.1.0
+
+- Support Code Assets 2.2 and native_toolchain_c 0.19.6, allowing apps to resolve pdfrx 3.0.2 alongside just_image.
+- Preserve the complete iOS and macOS deployment target during native builds and regenerate the FFI bindings with ffigen 23.
+- Upgrade AVIF decoding to avif-decode 3 (rav1d), keeping the libaom decoder on Android ARMv7 for stable Rust compatibility. Upgrade SVG rendering to resvg 0.50, PNG optimization to oxipng 10, resizing to fast_image_resize 6, transforms to imageproc 0.27 and EXIF reading to kamadak-exif 0.6.
+
 ## 3.0.0
 
 ### Breaking changes

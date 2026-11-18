@@ -1,6 +1,6 @@
 use image::{DynamicImage, ImageBuffer, Rgba};
 use imageproc::geometric_transformations::{
-    rotate_about_center, warp_into, Interpolation, Projection,
+    rotate_about_center, warp_into, Border, Interpolation, Projection,
 };
 
 use crate::pipeline::RotationCanvas;
@@ -93,7 +93,7 @@ pub fn rotate(
             &rgba,
             radians,
             Interpolation::Bilinear,
-            color,
+            Border::Constant(color),
         ));
     }
 
@@ -110,9 +110,9 @@ pub fn rotate(
     let mut rotated = ImageBuffer::from_pixel(output_width, output_height, color);
     warp_into(
         &rgba,
-        &projection,
+        projection,
         Interpolation::Bilinear,
-        color,
+        Border::Constant(color),
         &mut rotated,
     );
     DynamicImage::ImageRgba8(rotated)
