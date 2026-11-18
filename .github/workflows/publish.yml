@@ -12,7 +12,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  existing-release:
+    runs-on: ubuntu-22.04
+    outputs:
+      complete: ${{ steps.assets.outputs.complete }}
+    steps:
+      - name: Check for an existing binary release
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          complete=false
+          if assets=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets); then
+            if jq -e '.assets | length == 25 and any(.[]; .name == "SHA256SUMS")' <<< "$assets" >/dev/null; then
+              complete=true
+            fi
+          fi
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+
   desktop:
+    needs: existing-release
+    if: needs.existing-release.outputs.complete != 'true'
     name: ${{ matrix.artifact }}
     strategy:
       fail-fast: false
@@ -72,6 +92,8 @@ jobs:
           if-no-files-found: error
 
   linux:
+    needs: existing-release
+    if: needs.existing-release.outputs.complete != 'true'
     name: ${{ matrix.artifact }}
     strategy:
       fail-fast: false
@@ -113,6 +135,8 @@ jobs:
           if-no-files-found: error
 
   ios:
+    needs: existing-release
+    if: needs.existing-release.outputs.complete != 'true'
     name: iOS ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -166,6 +190,8 @@ jobs:
           if-no-files-found: error
 
   android:
+    needs: existing-release
+    if: needs.existing-release.outputs.complete != 'true'
     name: Android binaries
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -227,7 +253,12 @@ jobs:
 
   publish:
     name: Verify and publish package
-    needs: [desktop, linux, ios, android]
+    needs: [existing-release, desktop, linux, ios, android]
+    if: >-
+      ${{ !cancelled() && needs.existing-release.result == 'success' &&
+        (needs.existing-release.outputs.complete == 'true' ||
+          (needs.desktop.result == 'success' && needs.linux.result == 'success' &&
+           needs.ios.result == 'success' && needs.android.result == 'success')) }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -244,18 +275,20 @@ jobs:
         with:
           channel: stable
           cache: false
-      # setup-dart exchanges the GitHub OIDC identity for a short-lived
-      # pub.dev token. Installing Dart through Flutter alone does not perform
-      # that exchange and would leave `dart pub publish` waiting for login.
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: stable
       - name: Select Java for Flutter Android builds
         run: flutter config --jdk-dir="$JAVA_HOME"
       - uses: actions/download-artifact@v4
+        if: needs.existing-release.outputs.complete != 'true'
         with:
           path: release-assets
           merge-multiple: true
+      - name: Download existing release binaries
+        if: needs.existing-release.outputs.complete == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --dir release-assets
+          (cd release-assets && sed 's/  release-assets\//  /' SHA256SUMS | sha256sum --check)
 
       - name: Verify versions
         shell: bash
@@ -273,7 +306,10 @@ jobs:
           # Run the utility directly: `dart run` would invoke our native hook
           # before these hashes exist and bootstrap a needless Cargo build.
           dart --packages=.dart_tool/package_config.json tool/generate_hashes.dart release-assets "${GITHUB_REF_NAME#v}"
-          sha256sum release-assets/* > release-assets/SHA256SUMS
+          if [ ! -f release-assets/SHA256SUMS ]; then
+            (cd release-assets && sha256sum *) > release-assets/SHA256SUMS.tmp
+            mv release-assets/SHA256SUMS.tmp release-assets/SHA256SUMS
+          fi
           ! grep -q PENDING lib/src/hook_helpers/hashes.dart
           git config user.name github-actions
           git config user.email github-actions@github.com
@@ -281,6 +317,7 @@ jobs:
           git commit -m "chore: embed native hashes for $GITHUB_REF_NAME"
 
       - name: Publish GitHub Release assets
+        if: needs.existing-release.outputs.complete != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -309,6 +346,10 @@ jobs:
           "$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -1)" -c -P 16 4 example/flutter_app/build/app/outputs/flutter-apk/app-release.apk
           dart pub publish --dry-run
 
+      # Obtain a fresh short-lived token after the consumer builds.
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
       - name: Publish to pub.dev
         run: dart pub publish --force
 
