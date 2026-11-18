@@ -1,0 +1,17 @@
+name: just_image_pdfrx_test
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  just_image:
+    path: ../..
+  pdfrx: 3.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0

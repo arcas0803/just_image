@@ -26,6 +26,7 @@ edit Gradle or CMake files, add CocoaPods, or copy dynamic libraries.
 ## Requirements
 
 - Dart 3.13 or newer.
+- Building the native library from source requires Rust 1.98 or newer. x86_64 source builds also require NASM.
 - Flutter 3.47 or newer for Flutter applications.
 - The normal SDK/toolchain for the platform targeted by a Flutter app, such as
   Xcode for iOS or the Android SDK for Android.
@@ -39,7 +40,7 @@ edit Gradle or CMake files, add CocoaPods, or copy dynamic libraries.
 
 ```yaml
 dependencies:
-  just_image: ^3.0.0
+  just_image: ^3.1.0
 ```
 
 No additional consumer configuration is required.

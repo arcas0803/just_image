@@ -16,11 +16,15 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target
+  CARGO_TARGET_DIR: ${{ github.workspace }}/src/native/target
 
 jobs:
   quality:
-    name: Rust, Dart, Flutter and package
+    name: Rust, Dart, Flutter ${{ matrix.flutter }} and package
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: ['3.47.0', '3.50.0']
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -31,7 +35,7 @@ jobs:
           components: clippy, rustfmt
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ matrix.flutter }}
           cache: false
 
       - name: Resolve dependencies
@@ -80,6 +84,11 @@ jobs:
           flutter analyze
           flutter test
 
+      - name: Verify PDFium and Rust in the same Flutter process
+        if: matrix.flutter == '3.50.0'
+        working-directory: example/pdfrx
+        run: flutter test
+
       - name: Validate pub.dev package
         run: dart pub publish --dry-run
 
@@ -118,3 +127,47 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+
+  android:
+    name: Android release packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+      - name: Package the native library for all Android ABIs
+        working-directory: example/flutter_app
+        run: |
+          flutter config --jdk-dir="$JAVA_HOME"
+          flutter build apk --release
+          flutter build appbundle --release
+          python3 ../../tool/verify_android_elf.py build/app/outputs/flutter-apk/app-release.apk build/app/outputs/bundle/release/app-release.aab
+          "$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -1)" -c -P 16 4 build/app/outputs/flutter-apk/app-release.apk
+
+  ios:
+    name: iOS device and simulator packaging
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ilammy/setup-nasm@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+      - working-directory: example/flutter_app
+        run: |
+          flutter build ios --release --no-codesign
+          flutter build ios --simulator --debug

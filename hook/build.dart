@@ -95,28 +95,24 @@ Future<void> _compileWithCargo({
   _isolateCargoTargetDirectory(env, input.outputDirectoryShared, targetTriple);
   if (codeConfig.targetOS == OS.android) {
     applyAndroidPageSizeFlags(env);
-    // The NDK CMake toolchain defaults to armeabi-v7a unless ANDROID_ABI
-    // is explicit. Keep these settings target-specific for Cargo build scripts.
-    final key = 'CMAKE_TOOLCHAIN_FILE_${_ccTargetEnv(targetTriple)}';
-    final toolchain = env[key];
-    if (toolchain != null) {
-      final abi = switch (codeConfig.targetArchitecture) {
-        Architecture.arm64 => 'arm64-v8a',
-        Architecture.arm => 'armeabi-v7a',
-        Architecture.x64 => 'x86_64',
-        _ => throw BuildError(message: 'Unsupported Android architecture'),
-      };
+    if (codeConfig.targetArchitecture == Architecture.arm) {
+      // Only the legacy ARMv7 AVIF backend builds libaom through CMake.
+      final key = _ccTargetEnv(targetTriple);
+      final compiler = File(env['CC_$key']!);
+      // The versioned clang driver lives under toolchains/llvm/prebuilt/<host>/bin.
+      final toolchain = compiler.parent.uri.resolve(
+        '../../../../../build/cmake/android.toolchain.cmake',
+      );
       final wrapper = File.fromUri(
-        input.outputDirectory.resolve('android_toolchain.cmake'),
+        input.outputDirectory.resolve('armv7.cmake'),
       );
       await wrapper.parent.create(recursive: true);
       await wrapper.writeAsString(
-        'set(ANDROID_ABI "$abi" CACHE STRING "" FORCE)\n'
-        'set(ANDROID_PLATFORM "android-${codeConfig.android.targetNdkApi}" '
-        'CACHE STRING "" FORCE)\n'
-        'include("${toolchain.replaceAll(r"\", "/")}")\n',
+        'set(ANDROID_ABI "armeabi-v7a" CACHE STRING "" FORCE)\n'
+        'set(ANDROID_PLATFORM "android-${codeConfig.android.targetNdkApi}" CACHE STRING "" FORCE)\n'
+        'include("${toolchain.toFilePath().replaceAll(r"\", "/")}")\n',
       );
-      env[key] = wrapper.path;
+      env['CMAKE_TOOLCHAIN_FILE_$key'] = wrapper.path;
     }
   }
   if (codeConfig.targetOS == OS.macOS || codeConfig.targetOS == OS.iOS) {
@@ -126,12 +122,6 @@ Future<void> _compileWithCargo({
       input.outputDirectory,
     );
     env.addAll(appleEnv);
-    if (codeConfig.targetOS == OS.iOS &&
-        codeConfig.targetArchitecture == Architecture.x64) {
-      env['CMAKE_TOOLCHAIN_FILE_x86_64_apple_ios'] = crateDir
-          .resolve('cmake/ios-simulator-x64.cmake')
-          .toFilePath();
-    }
   }
 
   await _ensureRustTarget(targetTriple);
@@ -198,7 +188,7 @@ Future<void> _compileWithCargo({
   output.dependencies.addAll([
     crateDir.resolve('Cargo.toml'),
     crateDir.resolve('Cargo.lock'),
-    crateDir.resolve('cmake/ios-simulator-x64.cmake'),
+    crateDir.resolve('build.rs'),
     ...Directory.fromUri(crateDir.resolve('src/'))
         .listSync(recursive: true)
         .whereType<File>()
@@ -222,7 +212,7 @@ void _isolateCargoTargetDirectory(
   final configuredRoot = env['CARGO_TARGET_DIR'];
   if (configuredRoot == null && Platform.isWindows) {
     // MSBuild's file tracker still has a MAX_PATH limit. The nested Native
-    // Assets/Cargo/CMake output path exceeds it for libaom. Use a short,
+    // Assets/Cargo output path can exceed it. Use a short,
     // project- and target-specific temporary root for local Windows builds.
     final key = sha256
         .convert(utf8.encode('$outputDirectoryShared$targetTriple'))
@@ -440,7 +430,7 @@ Future<void> _configureAppleTarget(
 
   String sdk;
   String deploymentTargetKey;
-  int? deploymentTarget;
+  AppleVersion deploymentTarget;
   String versionFlag;
   String arch;
 
@@ -448,7 +438,7 @@ Future<void> _configureAppleTarget(
     final isSimulator = code.iOS.targetSdk == IOSSdk.iPhoneSimulator;
     sdk = isSimulator ? 'iphonesimulator' : 'iphoneos';
     deploymentTargetKey = 'IPHONEOS_DEPLOYMENT_TARGET';
-    deploymentTarget = code.iOS.targetVersion;
+    deploymentTarget = code.iOS.deploymentVersion;
     versionFlag = isSimulator
         ? '-mios-simulator-version-min'
         : '-miphoneos-version-min';
@@ -462,7 +452,7 @@ Future<void> _configureAppleTarget(
   } else if (os == OS.macOS) {
     sdk = 'macosx';
     deploymentTargetKey = 'MACOSX_DEPLOYMENT_TARGET';
-    deploymentTarget = code.macOS.targetVersion;
+    deploymentTarget = code.macOS.deploymentVersion;
     versionFlag = '-mmacosx-version-min';
     arch = code.targetArchitecture == Architecture.arm64 ? 'arm64' : 'x86_64';
   } else {
@@ -487,17 +477,20 @@ Future<void> _configureAppleTarget(
     );
   }
 
+  final minimumOS =
+      '${deploymentTarget.major}.${deploymentTarget.minor}.'
+      '${deploymentTarget.patch}';
   final targetFlags = <String>[
     '-isysroot',
     sdkPath ?? '',
     '-arch',
     arch,
-    '$versionFlag=$deploymentTarget',
+    '$versionFlag=$minimumOS',
   ]..removeWhere((s) => s.isEmpty);
 
   final targetCFlags = targetFlags.join(' ');
 
-  env[deploymentTargetKey] = deploymentTarget.toString();
+  env[deploymentTargetKey] = minimumOS;
 
   // For iOS cross-compilation, leave the host build-script environment
   // pointing at the macOS SDK so proc-macros and build.rs binaries link.
@@ -673,16 +666,6 @@ void _applyAndroidCCompilerConfig(
   env['CXX_$ccTarget'] = _cxxFromCompiler(targetCompiler);
   env['AR_$ccTarget'] = cCompiler.archiver.toFilePath();
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = targetCompiler;
-  // Use the same NDK as Native Assets, rather than a different installed NDK.
-  final toolchainMarker =
-      '${Platform.pathSeparator}toolchains${Platform.pathSeparator}';
-  final markerIndex = compiler.indexOf(toolchainMarker);
-  final ndkHome = markerIndex < 0
-      ? _findNdkHome()
-      : compiler.substring(0, markerIndex);
-  if (ndkHome != null) {
-    _applyAndroidCmakeToolchain(env, ndkHome, target);
-  }
 }
 
 /// Derives a likely C++ compiler path from a C compiler path.
@@ -752,22 +735,6 @@ void _configureAndroid(Map<String, String> env, CodeConfig code) {
   // The versioned clang script already has the correct --target and uses the
   // NDK's own ld.lld, so no wrapper is needed on any platform.
   env['CARGO_TARGET_${cargoTarget}_LINKER'] = compiler;
-  _applyAndroidCmakeToolchain(env, ndkHome, rustTarget);
-}
-
-/// Points CMake-based Rust dependencies (notably libaom) at the NDK. The
-/// target-suffixed variable is consumed by the `cmake` crate without leaking
-/// Android settings into host build scripts.
-void _applyAndroidCmakeToolchain(
-  Map<String, String> env,
-  String ndkHome,
-  String rustTarget,
-) {
-  final toolchain = '$ndkHome/build/cmake/android.toolchain.cmake';
-  if (!File(toolchain).existsSync()) {
-    throw BuildError(message: 'Android CMake toolchain not found: $toolchain');
-  }
-  env['CMAKE_TOOLCHAIN_FILE_${_ccTargetEnv(rustTarget)}'] = toolchain;
 }
 
 /// Maps a Rust Android target triple to the clang prefix used by the NDK.
